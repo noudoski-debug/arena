@@ -3,6 +3,12 @@
 // Generated from dump 1.14.11949. Methods are RVAs, NOT file offsets.
 // Internal address = ELF load bias + RVA; fields are object-relative.
 namespace offsets {
+// UnityEngine.Physics: public static bool Linecast(Vector3 start, Vector3 end, out RaycastHit hitInfo, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+inline constexpr uintptr_t PhysicsLinecast = 0xCCDED1C;
+// UnityEngine.RaycastHit: public Transform get_transform()
+inline constexpr uintptr_t HitTransform = 0xCCE76C4;
+// UnityEngine.Transform: public bool IsChildOf(Transform parent)
+inline constexpr uintptr_t IsChildOf = 0xCC3D400;
 // Oxide.PlayerManager: private void LateUpdate()
 inline constexpr uintptr_t PlayerLateUpdate = 0x699E0E0;
 // Oxide.FPHitscan: private void Update()
@@ -45,6 +51,20 @@ inline constexpr uintptr_t IsLocalPlayer = 0xC050A88;
 inline constexpr uintptr_t PlayerUpdate = 0x6992B00;
 // Oxide.PlayerManager: private void OnDisable()
 inline constexpr uintptr_t PlayerOnDisable = 0x69923D4;
+// UnityEngine.RaycastHit.m_Point
+inline constexpr uintptr_t HitPoint = 0x0;
+// UnityEngine.RaycastHit.m_Normal
+inline constexpr uintptr_t HitNormal = 0xC;
+// UnityEngine.RaycastHit.m_FaceID
+inline constexpr uintptr_t HitFace = 0x18;
+// UnityEngine.RaycastHit.m_Distance
+inline constexpr uintptr_t HitDistance = 0x1C;
+// UnityEngine.RaycastHit.m_UV
+inline constexpr uintptr_t HitUv = 0x20;
+// UnityEngine.RaycastHit.m_Collider
+inline constexpr uintptr_t HitCollider = 0x28;
+// UnityEngine.EntityId.m_Data
+inline constexpr uintptr_t EntityData = 0x0;
 // Oxide.PlayerManager.worldCameraRoot
 inline constexpr uintptr_t WorldCameraRoot = 0x68;
 // Oxide.PlayerManager.mouseLook

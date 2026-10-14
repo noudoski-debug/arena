@@ -25,7 +25,8 @@ struct AimbotVars {
     const char* boneNames[6] = {"Head","Neck","Chest","Pelvis","Arm","Leg"};
     bool  drawfov           = false;
     float maxDistance       = 300.0f;
-    bool  visibleOnly       = false;   // аим только по видимым врагам
+    bool  visibleOnly       = false;   // Только экран; сохранён для старых профилей
+    bool  visibleCheck      = false;   // Physics line-of-sight к выбранной точке
 
     // ── Silent Aim (Magic Bullets) ───────────────────────────────────────────
     bool  silentAim         = false;

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstddef>
 #include <mutex>
 #include <unordered_map>
 #include <unistd.h>
@@ -20,7 +21,26 @@ using modules::Vec2;
 using modules::Quaternion;
 using Method = const void*; // IL2CPP's hidden MethodInfo argument.
 using Lifecycle = void (*)(void*, Method);
+// Unboxed UnityEngine.RaycastHit; EntityId contains one int32 in this dump.
+struct RaycastHit {
+    Vec3 point, normal;
+    uint32_t face = 0;
+    float distance = 0;
+    Vec2 uv;
+    int32_t collider = 0;
+};
+static_assert(sizeof(RaycastHit)==44);
+static_assert(offsetof(RaycastHit,point)==offsets::HitPoint);
+static_assert(offsetof(RaycastHit,normal)==offsets::HitNormal);
+static_assert(offsetof(RaycastHit,face)==offsets::HitFace);
+static_assert(offsetof(RaycastHit,distance)==offsets::HitDistance);
+static_assert(offsetof(RaycastHit,uv)==offsets::HitUv);
+static_assert(offsetof(RaycastHit,collider)==offsets::HitCollider);
+static_assert(offsets::EntityData==0);
 struct Api {
+    bool (*linecast)(Vec3, Vec3, RaycastHit*, int, int, Method) = nullptr;
+    void* (*hitTransform)(RaycastHit*, Method) = nullptr;
+    bool (*isChildOf)(void*, void*, Method) = nullptr;
     Vec3 (*project)(void*, Vec3, Method) = nullptr;
     Vec3 (*position)(void*, Method) = nullptr;
     void* (*transform)(void*, Method) = nullptr;
@@ -39,7 +59,7 @@ struct Api {
     float (*aspect)(void*, Method) = nullptr;
     void (*setAspect)(void*, float, Method) = nullptr;
 };
-struct TimedBox { Box box; Clock::time_point time; Vec3 feet, head, right; };
+struct TimedBox { Box box; Clock::time_point time; Vec3 feet, head, right; void* transform=nullptr; };
 struct CameraState {
     void* camera=nullptr; void* transform=nullptr;
     bool free=false, fov=false, aspect=false;
@@ -174,7 +194,7 @@ void onUpdate(void* player, Method method) {
     }
     std::lock_guard<std::mutex> lock(s.mutex);
     if (s.players.size() < 512 || s.players.count(box.id))
-        s.players[box.id] = {std::move(box), Clock::now(), feet, head, right};
+        s.players[box.id] = {std::move(box), Clock::now(), feet, head, right, transform};
 }
 struct Options { AllVars values; modules::Controls controls; };
 Options options() {
@@ -188,7 +208,19 @@ float delta(Clock::time_point& last) {
     float dt=std::chrono::duration<float>(now-last).count(); last=now;
     return dt>.001f && dt<.1f ? dt : 1.f/60.f;
 }
-bool selectTarget(void* camera, int bone, float fov, float maxDistance, bool onScreen, Vec3& result) {
+bool lineOfSight(Vec3 origin, Vec3 point, void* targetTransform) {
+    const auto& api=state().api;
+    // Fail closed: unavailable physics must never silently mean "visible".
+    if (!api.linecast || !api.hitTransform || !api.isChildOf || !targetTransform) return false;
+    RaycastHit hit{};
+    // All layers, Ignore triggers (QueryTriggerInteraction.Ignore = 1).
+    // A wall/other player blocks; the target's own collider is a valid first hit.
+    if (!api.linecast(origin,point,&hit,~0,1,nullptr)) return true;
+    void* transform=api.hitTransform(&hit,nullptr);
+    return transform && (transform==targetTransform || api.isChildOf(transform,targetTransform,nullptr));
+}
+bool selectTarget(void* camera, int bone, float fov, float maxDistance, bool onScreen, Vec3& result,
+                  bool visibleCheck=false) {
     auto& s=state();
     void* transform=s.api.transform(camera,nullptr);
     if (!transform) return false;
@@ -206,10 +238,12 @@ bool selectTarget(void* camera, int bone, float fov, float maxDistance, bool onS
         float distance=modules::length(point-origin);
         if (!std::isfinite(distance) || distance<.3f || distance>maxDistance) continue;
         Vec3 projected=s.api.project(camera,point,nullptr);
-        if (projected.z<=.1f || !std::isfinite(projected.x) || !std::isfinite(projected.y)) continue;
+        if (!std::isfinite(projected.z) || projected.z<=.1f || !std::isfinite(projected.x) || !std::isfinite(projected.y)) continue;
         if (onScreen && (projected.x<0 || projected.y<0 || projected.x>width || projected.y>height)) continue;
         float x=projected.x-width*.5f, y=projected.y-height*.5f, metric=x*x+y*y;
-        if (metric<best) { best=metric;result=point;found=true; }
+        if (metric<=best && (!visibleCheck || lineOfSight(origin,point,t.transform))) {
+            best=metric;result=point;found=true;
+        }
     }
     return found;
 }
@@ -229,7 +263,7 @@ void applyLocal(void* player) {
         (v.Aimbot.aimBind==0 || v.Aimbot.aimBind==273 || opts.controls.aimHeld)) {
         Vec3 target;
         if (selectTarget(camera,v.Aimbot.selectedBoneIndex,v.Aimbot.fovcheck?v.Aimbot.fov:100000.f,
-                         v.Aimbot.maxDistance,v.Aimbot.visibleOnly,target)) {
+                         v.Aimbot.maxDistance,v.Aimbot.visibleOnly,target,v.Aimbot.visibleCheck)) {
             void* look=field<void*>(player,offsets::MouseLook);
             void* cameraTransform=s.api.transform(camera,nullptr);
             if (look && cameraTransform) {
@@ -388,6 +422,9 @@ void installGameHooks() {
         if (!update) sleep(1);
     }
     const uintptr_t disable = resolve(offsets::PlayerOnDisable);
+    s.api.linecast=reinterpret_cast<decltype(s.api.linecast)>(resolve(offsets::PhysicsLinecast));
+    s.api.hitTransform=reinterpret_cast<decltype(s.api.hitTransform)>(resolve(offsets::HitTransform));
+    s.api.isChildOf=reinterpret_cast<decltype(s.api.isChildOf)>(resolve(offsets::IsChildOf));
     s.api.project = reinterpret_cast<decltype(s.api.project)>(resolve(offsets::WorldToScreenPoint));
     s.api.position = reinterpret_cast<decltype(s.api.position)>(resolve(offsets::GetPosition));
     s.api.transform = reinterpret_cast<decltype(s.api.transform)>(resolve(offsets::GetTransform));
@@ -429,7 +466,10 @@ void installGameHooks() {
         hook(offsets::WeaponUpdate,onWeaponUpdate,s.api.weaponUpdate);
         hook(offsets::FpLateUpdate,onFpLate,s.api.fpLate);
         s.moduleReady.store(ok);
-        s.message.store(ok?"Internal ESP + module hooks ready":"ESP ready / ERROR: gameplay module hooks failed");
+        s.message.store(!ok?"ESP ready / ERROR: gameplay module hooks failed":
+            (!s.api.linecast || !s.api.hitTransform || !s.api.isChildOf)?
+            "ESP + Aim ready / Visible Check unavailable (blocks targets when enabled)":
+            "Internal ESP + Aim + Visible Check hooks ready");
     } else if (s.ready.load()) s.message.store("ESP ready / ERROR: module API unavailable");
     __android_log_print(ANDROID_LOG_INFO, "DearVision", "%s", status());
 }

@@ -8,6 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 METHODS = {
+    'PhysicsLinecast': ('UnityEngine', 'Physics', 'public static bool Linecast(Vector3 start, Vector3 end, out RaycastHit hitInfo, int layerMask, QueryTriggerInteraction queryTriggerInteraction)'),
+    'HitTransform': ('UnityEngine', 'RaycastHit', 'public Transform get_transform()'),
+    'IsChildOf': ('UnityEngine', 'Transform', 'public bool IsChildOf(Transform parent)'),
     'PlayerLateUpdate': ('Oxide', 'PlayerManager', 'private void LateUpdate()'),
     'WeaponUpdate': ('Oxide', 'FPHitscan', 'private void Update()'),
     'FpLateUpdate': ('Oxide', 'FPManager', 'private void LateUpdate()'),
@@ -31,6 +34,13 @@ METHODS = {
     'PlayerOnDisable': ('Oxide', 'PlayerManager', 'private void OnDisable()'),
 }
 FIELDS = {
+    'HitPoint': ('UnityEngine', 'RaycastHit', 'm_Point'),
+    'HitNormal': ('UnityEngine', 'RaycastHit', 'm_Normal'),
+    'HitFace': ('UnityEngine', 'RaycastHit', 'm_FaceID'),
+    'HitDistance': ('UnityEngine', 'RaycastHit', 'm_Distance'),
+    'HitUv': ('UnityEngine', 'RaycastHit', 'm_UV'),
+    'HitCollider': ('UnityEngine', 'RaycastHit', 'm_Collider'),
+    'EntityData': ('UnityEngine', 'EntityId', 'm_Data'),
     'WorldCameraRoot': ('Oxide', 'PlayerManager', 'worldCameraRoot'),
     'MouseLook': ('Oxide', 'PlayerManager', 'mouseLook'),
     'LookAngle': ('Oxide', 'PlayerManager', 'lookAngle'),
@@ -75,7 +85,7 @@ def class_block(text, namespace, name):
         ns, _, body = section.partition('\n')
         if ns.strip() != namespace:
             continue
-        if re.search(r'^public (?:sealed |abstract )?class ' + re.escape(name) + r'(?:\s|:)', body, re.M):
+        if re.search(r'^public (?:sealed |abstract |readonly )?(?:class|struct) ' + re.escape(name) + r'(?:\s|:)', body, re.M):
             found.append(body)
     if len(found) != 1:
         raise ValueError(f'{namespace}.{name}: expected one class, found {len(found)}')

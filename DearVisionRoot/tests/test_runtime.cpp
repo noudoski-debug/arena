@@ -1,10 +1,69 @@
 #include "../jni/src/Runtime.cpp"
 #include <array>
 #include <cassert>
+#include <limits>
 extern "C" int DobbyHook(void*, void*, void**) { return -1; }
 namespace {
 int updates=0, disables=0, cameraObject=0;
 bool local=false;
+int casts=0, rootObject=0, childObject=0, wallObject=0;
+int collisionMode=0;
+runtime::Vec3 lastStart{},lastEnd{};
+void testTargeting() {
+    auto& s=runtime::state();
+    s.players.clear();
+    s.localPlayer=nullptr;
+    runtime::TimedBox target;
+    target.time=runtime::Clock::now();target.box.id=123;
+    target.feet={0,0,10};target.head={0,1.6f,10};target.right={1,0,0};target.transform=&rootObject;
+    s.players[123]=target;
+    runtime::Vec3 selected{};
+    auto select=[&](bool visible,float fov=100,float distance=300,int bone=0) {
+        return runtime::selectTarget(&cameraObject,bone,fov,distance,false,selected,visible);
+    };
+    assert(select(false));
+    assert(!select(true)); // No physics API: fail closed.
+    s.api.linecast=[](runtime::Vec3 start,runtime::Vec3 end,runtime::RaycastHit*,int mask,int triggers,const void*) {
+        ++casts;lastStart=start;lastEnd=end;
+        assert(mask==~0 && triggers==1);
+        return collisionMode!=0 && !(collisionMode==4 && end.x>0);
+    };
+    s.api.hitTransform=[](runtime::RaycastHit*,const void*) -> void* {
+        if(collisionMode==1)return &rootObject;
+        if(collisionMode==2)return &childObject;
+        if(collisionMode==5)return nullptr;
+        return &wallObject;
+    };
+    s.api.isChildOf=[](void* child,void* parent,const void*) {
+        return child==&childObject && parent==&rootObject;
+    };
+    assert(select(true)); // Clear segment.
+    assert(lastStart.z==0 && lastEnd.y==1.6f && lastEnd.z==10);
+    collisionMode=1;assert(select(true)); // Target's collider is not a wall.
+    collisionMode=2;assert(select(true)); // Child collider on target.
+    collisionMode=3;assert(!select(true)); // Wall / other player's collider.
+    int before=casts;assert(select(false) && casts==before);
+    collisionMode=5;assert(!select(true)); // Unknown hit must block.
+    collisionMode=0;
+    before=casts;assert(!select(true,15) && casts==before); // Outside radius.
+    assert(select(true,16)); // Boundary is inclusive.
+    before=casts;assert(!select(true,100,5) && casts==before);
+    assert(select(true,100,300,2) && lastEnd.y<1.6f); // Selected bone, not always head.
+    s.players[123].time-=std::chrono::seconds(1);
+    before=casts;assert(!select(true) && casts==before);
+    s.players[123]=target;
+    s.players[123].head.z=-10;s.players[123].feet.z=-10;
+    assert(!select(true)); // Behind camera.
+    s.players[123]=target;
+    s.players[123].head.z=std::numeric_limits<float>::quiet_NaN();
+    assert(!select(true));
+    s.players[123]=target;
+    target.box.id=456;target.feet.x=target.head.x=1;
+    s.players[456]=target;collisionMode=4;
+    assert(select(true) && selected.x==1); // Occluded nearest doesn't hide a visible candidate.
+    s.players.clear();
+}
+
 float cameraFov=60,cameraAspect=1.7f;
 runtime::Vec3 cameraPosition{};
 runtime::Quaternion cameraRotation{};
@@ -105,8 +164,22 @@ int main() {
     options.Menu.openmenu=true;runtime::submit(options,{});s.players.clear();
     runtime::onUpdate(player.data(),nullptr);
     assert(!s.silentSaved && runtime::field<runtime::Vec3>(player.data(),offsets::LastTickPosition).z==3);
+    // Normal Aim wiring: Visible Check blocks angle writes; disabling it allows snap.
+    alignas(8) std::array<unsigned char,0x100> look{};
+    *runtime::address<void*>(player.data(),offsets::MouseLook)=look.data();
+    options=AllVars{};options.Aimbot.enableAimbot=true;options.Aimbot.scopeCheck=false;
+    options.Aimbot.visibleCheck=true;options.Aimbot.smooth=0;
+    s.players[123]=target;
+    runtime::submit(options,{});runtime::onUpdate(player.data(),nullptr);
+    assert(runtime::field<float>(player.data(),offsets::LookAngle)==0);
+    options.Aimbot.visibleCheck=false;
+    runtime::submit(options,{});runtime::onUpdate(player.data(),nullptr);
+    float desired=modules::angles(target.head).y;
+    assert(std::fabs(runtime::field<float>(player.data(),offsets::LookAngle)-desired)<.001f);
+    assert(std::fabs(runtime::field<runtime::Vec2>(look.data(),offsets::MouseAngles).x-desired)<.001f);
     // Disable invalidates local bindings and never carries an old avatar's saved state forward.
     runtime::onDisable(player.data(),nullptr);assert(s.localPlayer==nullptr);
+    testTargeting();
     // The returned frame owns data; removing player state cannot invalidate it.
     assert(frame.boxes[0].distance==10);
 }

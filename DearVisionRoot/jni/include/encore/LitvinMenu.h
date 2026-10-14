@@ -305,9 +305,10 @@ inline std::vector<Section>& Sections() {
                 T  ("AimBot Enable",    &Vars.Aimbot.enableAimbot),
                 T  ("Scope Only",       &Vars.Aimbot.scopeCheck),
                 T  ("On-screen Only",     &Vars.Aimbot.visibleOnly),
+                T  ("Visible Check",      &Vars.Aimbot.visibleCheck),
                 T  ("Draw FOV",         &Vars.Aimbot.drawfov),
                 T  ("FOV Check",        &Vars.Aimbot.fovcheck),
-                SlF("FOV",              &Vars.Aimbot.fov,        30.f,400.f,"%.0f"),
+                SlF("FOV radius (px)",  &Vars.Aimbot.fov,        30.f,400.f,"%.0f"),
                 // Smooth: 0 = мгновенно/точно на голове, 100 = очень медленно
                 SlF("Smooth (0=snap)",  &Vars.Aimbot.smooth,      0.f,100.f,"%.0f"),
                 SlF("Max Distance (m)", &Vars.Aimbot.maxDistance, 50.f,800.f,"%.0f"),
@@ -424,7 +425,7 @@ inline bool Supported(const Row& r) {
         r.b==&Vars.ESP.distance || r.b==&Vars.ESP.tracer || r.b==&Vars.ESP.xrayFill ||
         r.b==&Vars.ESP.count || r.b==&Vars.ESP.outline || r.b==&Vars.ESP.outOfScreen ||
         r.b==&Vars.Aimbot.enableAimbot || r.b==&Vars.Aimbot.scopeCheck || r.b==&Vars.Aimbot.visibleOnly ||
-        r.b==&Vars.Aimbot.drawfov || r.b==&Vars.Aimbot.fovcheck || r.b==&Vars.Aimbot.silentAim ||
+        r.b==&Vars.Aimbot.visibleCheck || r.b==&Vars.Aimbot.drawfov || r.b==&Vars.Aimbot.fovcheck || r.b==&Vars.Aimbot.silentAim ||
         r.b==&Vars.Aimbot.silentScopeCheck || r.b==&Vars.Aimbot.silentVisibleOnly ||
         r.b==&Vars.Player.norecoil || r.b==&Vars.Player.nospread || r.b==&Vars.Player.armfov ||
         r.b==&Vars.Player.camerafov || r.b==&Vars.Player.aspect_ratio || r.b==&Vars.FreeCam.enable ||

@@ -31,6 +31,21 @@ public int Value(int x) { }
         with self.assertRaises(ValueError):
             o.class_block(text+text, 'UnityEngine', 'Camera')
 
+    def test_struct_namespace(self):
+        text = """// Namespace: Other
+public struct RaycastHit
+{
+public int other; // 0x0
+}
+// Namespace: UnityEngine
+public struct RaycastHit
+{
+internal int m_Collider; // 0x28
+}
+"""
+        block = o.class_block(text, 'UnityEngine', 'RaycastHit')
+        self.assertEqual(o.field_offset(block, 'm_Collider'), 0x28)
+
     def test_missing_or_generic_rva(self):
         for text in ('public int Value() { }', '// RVA: -1 Offset: -1\npublic int Value() { }'):
             with self.assertRaises(ValueError): o.method_rva(text, 'public int Value()')

@@ -24,7 +24,7 @@ inline Vec2 aimStep(Vec2 current,Vec2 target,float smooth,float dt) {
     smooth=std::clamp(smooth,0.f,100.f);
     dt=std::clamp(dt,0.f,0.1f);
     const float response=60.f*std::pow(0.5f/60.f,smooth/100.f);
-    const float blend=1.f-std::exp(-response*dt);
+    const float blend=dt<=0.f?0.f:(smooth==0.f?1.f:1.f-std::exp(-response*dt));
     return {current.x+wrap(target.x-current.x)*blend,
             std::clamp(current.y+wrap(target.y-current.y)*blend,-85.f,85.f)};
 }

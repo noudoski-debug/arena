@@ -21,6 +21,7 @@ int main() {
     io.Fonts->AddFontDefault();
     unsigned char* pixels; int w,h; io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
     assert(LitvinMenu::Supported(LitvinMenu::T("Aim",&Vars.Aimbot.enableAimbot)));
+    assert(LitvinMenu::Supported(LitvinMenu::T("Visible Check",&Vars.Aimbot.visibleCheck)));
     assert(!LitvinMenu::Supported(LitvinMenu::T("No source",&Vars.Gun.wallshot)));
     assert(LitvinMenu::Supported(LitvinMenu::T("ESP",&Vars.ESP.enable)));
     LitvinMenu::open=true; Vars.ESP.enable=true;

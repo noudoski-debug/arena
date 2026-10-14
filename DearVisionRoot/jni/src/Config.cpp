@@ -36,6 +36,7 @@ template<class F> void schema(AllVars& v,F f) {
     N("box.r",ESP.boxColor[0],0,1);N("box.g",ESP.boxColor[1],0,1);N("box.b",ESP.boxColor[2],0,1);
     N("line.r",ESP.lineColor[0],0,1);N("line.g",ESP.lineColor[1],0,1);N("line.b",ESP.lineColor[2],0,1);
     B("aim.enable",Aimbot.enableAimbot);B("aim.scope",Aimbot.scopeCheck);B("aim.screen",Aimbot.visibleOnly);
+    B("aim.visibleCheck",Aimbot.visibleCheck);
     B("aim.draw",Aimbot.drawfov);B("aim.fovCheck",Aimbot.fovcheck);N("aim.fov",Aimbot.fov,30,400);
     N("aim.smooth",Aimbot.smooth,0,100);N("aim.distance",Aimbot.maxDistance,50,800);
     N("aim.bone",Aimbot.selectedBoneIndex,0,5);N("aim.bind",Aimbot.aimBind,0,767);

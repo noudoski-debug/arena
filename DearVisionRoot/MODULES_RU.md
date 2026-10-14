@@ -8,7 +8,7 @@
 | LitvinMenu / темы / анимации | Перенесены, настройки привязаны к internal-модулям | Не все пункты исходного меню имели backend |
 | ESP box, line, fill, ID, distance, count | Unity projection в Update, snapshot в renderer | ID — не nickname; счётчик обновлённых объектов, не всего сервера |
 | ESP arrows | Добавлена отрисовка направлений для целей вне экрана | Требуется свежий snapshot |
-| Aim | Выбор цели, FOV, сглаживание, дальность, scope, шесть точек | Head — worldCameraRoot при валидных данных; другие точки приблизительные. `On-screen Only` НЕ line-of-sight |
+| Aim | Выбор цели, FOV (радиус в px), Smooth (0=snap), дальность, scope, шесть точек, отдельный Visible Check через Physics.Linecast | Head — worldCameraRoot при валидных данных; другие точки приблизительные. Visible Check: все слои, без триггеров; первое попадание в цель/её дочерний Transform допустимо. Это проверка коллайдеров, не материалов; runtime не проверен. `On-screen Only` остаётся отдельным фильтром |
 | SilentAim из исходника | Перенесён как **Origin Override (EXPERIMENT)**, с исправленным восстановлением | Исходник подменяет `lastTickPosition`, а не траекторию/выстрел. Это НЕ доказанный Silent Aim/Magic Bullets |
 | No Recoil / No Spread | Исправлена цепочка config; scoped override вокруг локального `FPHitscan.Update` | Только этот callback/type; выстрелы вне него могут не измениться. После callback значения восстановлены |
 | FOV Arms | Scoped override `FPObject.normalFOV/aimFOV` в `FPManager.LateUpdate` | Поля `int`, не `float`; после callback восстановлены |
