@@ -8,6 +8,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 METHODS = {
+    'PlayerLateUpdate': ('Oxide', 'PlayerManager', 'private void LateUpdate()'),
+    'WeaponUpdate': ('Oxide', 'FPHitscan', 'private void Update()'),
+    'FpLateUpdate': ('Oxide', 'FPManager', 'private void LateUpdate()'),
+    'SetPosition': ('UnityEngine', 'Transform', 'public void set_position(Vector3 value)'),
+    'GetRotation': ('UnityEngine', 'Transform', 'public Quaternion get_rotation()'),
+    'SetRotation': ('UnityEngine', 'Transform', 'public void set_rotation(Quaternion value)'),
+    'GetForward': ('UnityEngine', 'Transform', 'public Vector3 get_forward()'),
+    'GetRight': ('UnityEngine', 'Transform', 'public Vector3 get_right()'),
+    'GetFov': ('UnityEngine', 'Camera', 'public float get_fieldOfView()'),
+    'SetFov': ('UnityEngine', 'Camera', 'public void set_fieldOfView(float value)'),
+    'GetAspect': ('UnityEngine', 'Camera', 'public float get_aspect()'),
+    'SetAspect': ('UnityEngine', 'Camera', 'public void set_aspect(float value)'),
     'WorldToScreenPoint': ('UnityEngine', 'Camera', 'public Vector3 WorldToScreenPoint(Vector3 position)'),
     'GetPosition': ('UnityEngine', 'Transform', 'public Vector3 get_position()'),
     'GetTransform': ('UnityEngine', 'Component', 'public Transform get_transform()'),
@@ -19,6 +31,28 @@ METHODS = {
     'PlayerOnDisable': ('Oxide', 'PlayerManager', 'private void OnDisable()'),
 }
 FIELDS = {
+    'WorldCameraRoot': ('Oxide', 'PlayerManager', 'worldCameraRoot'),
+    'MouseLook': ('Oxide', 'PlayerManager', 'mouseLook'),
+    'LookAngle': ('Oxide', 'PlayerManager', 'lookAngle'),
+    'LastTickPosition': ('Oxide', 'PlayerManager', 'lastTickPosition'),
+    'FpManager': ('Oxide', 'PlayerManager', 'fpManager'),
+    'WorldCamera': ('Oxide', 'FPManager', 'm_WorldCamera'),
+    'CurrentWeapon': ('Oxide', 'FPManager', '_currentWeapon'),
+    'ScopeBlend': ('Oxide', 'FPManager', '<qkr>k__BackingField'),
+    'MouseAngles': ('Oxide', 'MouseLook', 'qxz'),
+    'WeaponPlayer': ('Oxide', 'FPObject', 'Player'),
+    'NormalFov': ('Oxide', 'FPObject', 'normalFOV'),
+    'AimFov': ('Oxide', 'FPObject', 'aimFOV'),
+    'WeaponConfig': ('Oxide', 'FPHitscan', 'config'),
+    'RecoilConfig': ('HyperHug.Games.Oxide.Features.Weapons', 'HitscanWeaponConfig', 'recoilConfig'),
+    'DispersionConfig': ('HyperHug.Games.Oxide.Features.Weapons', 'HitscanWeaponConfig', 'dispersionConfig'),
+    'MinRecoil': ('HyperHug.Games.Oxide.Features.Weapons', 'RecoilConfig', '<MinRecoil>k__BackingField'),
+    'MaxRecoil': ('HyperHug.Games.Oxide.Features.Weapons', 'RecoilConfig', '<MaxRecoil>k__BackingField'),
+    'MinFireDispersion': ('HyperHug.Games.Oxide.Features.Weapons', 'DispersionConfig', 'minFireDispersion'),
+    'MaxFireDispersion': ('HyperHug.Games.Oxide.Features.Weapons', 'DispersionConfig', 'maxFireDispersion'),
+    'MinDispersion': ('HyperHug.Games.Oxide.Features.Weapons', 'DispersionConfig', 'minDispersion'),
+    'MaxDispersion': ('HyperHug.Games.Oxide.Features.Weapons', 'DispersionConfig', 'maxDispersion'),
+    'DispersionIncrease': ('HyperHug.Games.Oxide.Features.Weapons', 'DispersionConfig', 'dispersionIncreasePerShot'),
     'Respawning': ('Oxide', 'PlayerManager', 'respawning'),
     'Kicked': ('Oxide', 'PlayerManager', 'kicked'),
     'UserId': ('Oxide', 'PlayerManager', 'userID'),
@@ -66,7 +100,7 @@ def method_rva(block, signature):
 
 def field_offset(block, name):
     fields = block.split('// Properties')[0].split('// Methods')[0]
-    hits = re.findall(r'\b' + re.escape(name) + r';\s*// (0x[0-9A-Fa-f]+)', fields)
+    hits = re.findall(r'(?<!\w)' + re.escape(name) + r';\s*// (0x[0-9A-Fa-f]+)', fields)
     if len(hits) != 1:
         raise ValueError(f'{name}: expected one field, found {len(hits)}')
     return int(hits[0], 16)

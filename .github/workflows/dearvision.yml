@@ -38,7 +38,7 @@ jobs:
           package=DearVisionRoot/build/package
           mkdir -p "$package"
           cp "$out/libDear.so" "$out/dear-loader" DearVisionRoot/run-root.sh "$package/"
-          cp DearVisionRoot/README_RU.md DearVisionRoot/THIRD_PARTY.md "$package/"
+          cp DearVisionRoot/README_RU.md DearVisionRoot/MODULES_RU.md DearVisionRoot/THIRD_PARTY.md "$package/"
           cp -r DearVisionRoot/licenses "$package/"
           printf 'Commit: %s\nNDK: %s\nDevice tested: NO\n' "$GITHUB_SHA" "$NDK_PATH" > "$package/BUILD.txt"
           (cd "$package" && sha256sum libDear.so dear-loader > SHA256SUMS)
@@ -47,3 +47,15 @@ jobs:
           name: DearVisionRoot-arm64-untested-on-device
           if-no-files-found: error
           path: DearVisionRoot/build/package/
+
+      - name: Export buildable sources with dump
+        shell: bash
+        run: |
+          mkdir -p DearVisionRoot/build/sources
+          git archive --format=zip --output=DearVisionRoot/build/sources/DearVisionRoot-source.zip HEAD \
+            DearVisionRoot 'dump 1.14.11949.zip' .github/workflows/dearvision.yml .gitignore README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DearVisionRoot-source-with-dump
+          if-no-files-found: error
+          path: DearVisionRoot/build/sources/DearVisionRoot-source.zip

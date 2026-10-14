@@ -5,20 +5,52 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <deque>
+#include <array>
+#include <algorithm>
+#include <atomic>
 #include <mutex>
 
 namespace input {
 namespace {
 struct Event { float x, y; int button; }; // -1: move, 0: release, 1: press
-struct Queue { std::mutex mutex; std::deque<Event> events; };
+struct Queue { std::mutex mutex; std::deque<Event> events; std::vector<Touch> touches;
+    std::array<std::atomic<bool>,768> keys{}; std::atomic<bool> toggle{false}; };
 Queue& queue() { static Queue q; return q; }
 using InitializeMotion = void (*)(void*, void*, void*);
 using Consume = int32_t (*)(void*, void*, bool, int64_t, uint32_t*, void**);
 InitializeMotion originalInit = nullptr;
 Consume originalConsume = nullptr;
 void capture(AInputEvent* event) {
-    if (!event || AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION ||
-        AMotionEvent_getPointerCount(event) == 0) return;
+    if (!event) return;
+    auto& state=queue();
+    if (AInputEvent_getType(event)==AINPUT_EVENT_TYPE_KEY) {
+        int code=AKeyEvent_getScanCode(event);
+        int action=AKeyEvent_getAction(event);
+        if (code>0 && code<(int)state.keys.size()) {
+            bool down=action!=AKEY_EVENT_ACTION_UP;
+            bool old=state.keys[code].exchange(down);
+            if (down && !old && (code==68 || code==110)) state.toggle.store(true);
+        }
+        return;
+    }
+    if (AInputEvent_getType(event)!=AINPUT_EVENT_TYPE_MOTION || AMotionEvent_getPointerCount(event)==0) return;
+    int full=AMotionEvent_getAction(event);
+    int kind=full & AMOTION_EVENT_ACTION_MASK;
+    int index=(full & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)>>AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.touches.clear();
+        if (kind!=AMOTION_EVENT_ACTION_UP && kind!=AMOTION_EVENT_ACTION_CANCEL) {
+            size_t count=std::min<size_t>(AMotionEvent_getPointerCount(event),10);
+            for(size_t i=0;i<count;++i) {
+                if(kind==AMOTION_EVENT_ACTION_POINTER_UP && (int)i==index) continue;
+                state.touches.push_back({AMotionEvent_getPointerId(event,i),AMotionEvent_getX(event,i),AMotionEvent_getY(event,i)});
+            }
+        }
+    }
+    int buttons=AMotionEvent_getButtonState(event);
+    state.keys[272].store((buttons & AMOTION_EVENT_BUTTON_PRIMARY)!=0);
+    state.keys[273].store((buttons & AMOTION_EVENT_BUTTON_SECONDARY)!=0);
     int action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
     int button = -1;
     if (action == AMOTION_EVENT_ACTION_DOWN) button = 1;
@@ -49,13 +81,17 @@ void* symbol(const char* name) {
 }
 }
 bool install() {
-    void* init = symbol("_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE");
-    if (init && DobbyHook(init, reinterpret_cast<void*>(initialize), reinterpret_cast<void**>(&originalInit)) == 0) return true;
+    // Prefer consume: it receives keyboard AND motion events. Fallback supports touch only.
     void* read = symbol("_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE");
     if (read && DobbyHook(read, reinterpret_cast<void*>(consume), reinterpret_cast<void**>(&originalConsume)) == 0) return true;
+    void* init = symbol("_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE");
+    if (init && DobbyHook(init, reinterpret_cast<void*>(initialize), reinterpret_cast<void**>(&originalInit)) == 0) return true;
     __android_log_print(ANDROID_LOG_ERROR, "DearVision", "Input hook unavailable on this Android build");
     return false;
 }
+std::vector<Touch> touches() { auto& q=queue();std::lock_guard<std::mutex> lock(q.mutex);return q.touches; }
+bool isDown(int code) { return code<=0 || (code<(int)queue().keys.size() && queue().keys[code].load()); }
+bool consumeMenuToggle() { return queue().toggle.exchange(false); }
 void pump() {
     std::deque<Event> events;
     { auto& q = queue(); std::lock_guard<std::mutex> lock(q.mutex); events.swap(q.events); }

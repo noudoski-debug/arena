@@ -1,11 +1,13 @@
 # DearVision / Oxide
 
-Разрабатываемая **internal ARM64 root-база**: [`DearVisionRoot`](DearVisionRoot/README_RU.md).
+**Internal ARM64 root-проект** для дампа `1.14.11949`:
+[`DearVisionRoot/README_RU.md`](DearVisionRoot/README_RU.md).
 
-- `libDear.so`: внутренние хуки/ESP и меню Encore.
+- `libDear.so`: внутренние хуки, ESP, меню и адаптированные модули Encore.
 - `dear-loader`: экспериментальный root-загрузчик, не external-оверлей.
-- Оффсеты проверены по дампу `1.14.11949`.
-- Host-тесты и Android ARM64-сборка прошли в GitHub Actions; работа на устройстве ещё не проверена.
-- Остальные игровые модули Encore ещё не портированы и заблокированы в меню.
+- CI собирает бинарный архив и отдельный архив исходников с дампом.
+- **Не все пункты исходного меню имели backend.** Точная готовность и ограничения:
+  [`MODULES_RU.md`](DearVisionRoot/MODULES_RU.md).
+- Host-тесты и NDK-сборка не подтверждают работу на телефоне; device-тестов нет.
 
-Исходные `@dearvision.zip`, `EncoreDLC3.zip` и `dump 1.14.11949.zip` сохранены без изменений.
+Исходные `@dearvision.zip`, `EncoreDLC3.zip` и `dump 1.14.11949.zip` сохранены.

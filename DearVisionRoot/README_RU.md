@@ -1,62 +1,47 @@
 # DearVisionRoot — internal ARM64
 
-**Internal-база с успешно скомпилированными ARM64-бинарниками. Не APK.**
-Цель: `com.catsbit.oxidesurvivalisland`, дамп `1.14.11949`, `arm64-v8a`.
-Android NDK-сборка и host-тесты **прошли в GitHub Actions**.
-[Первый успешный запуск CI](https://github.com/noudoski-debug/arena/actions/runs/38590166098).
-**Запуск на телефоне ещё не проверен**; успешная компиляция не подтверждает работу хуков в игре.
+Пакет: `com.catsbit.oxidesurvivalisland`. Дамп: `1.14.11949`. Архитектура: `arm64-v8a`.
+Это **внутренняя `libDear.so` с root-загрузчиком**, не APK и не external-оверлей.
 
-## Что перенесено
+## Что готово и что нет
 
-- Внутренняя библиотека **`libDear.so`** вместо external-процесса и клонера.
-- Меню **Encore / LitvinMenu**: разделы, виджеты, анимации и четыре темы.
-- Internal ESP: боксы, заливка, линии, цвета, обводка, толщина линий,
-  расстояние от камеры, ID игроков и счётчик недавно обновлявшихся игроков.
-- Хуки `PlayerManager.Update` и `OnDisable`; Unity-функции вызываются в игровом
-  `Update`, а не из потока ImGui. В рендер передаются копии данных, не указатели на игроков.
-- Инициализация через ELF constructor: загрузка через `dlopen` не требует `JNI_OnLoad` или Java VM.
-- Отдельный экспериментальный root-загрузчик `dear-loader` и скрипт запуска.
+Перенесены реализованные части Encore: меню, ESP/стрелки, Aim, эксперимент origin,
+FreeCam, FOV/Aspect, scoped No Recoil / No Spread / Arms FOV, визуальные Chams,
+профили, ввод и renderer HitEffect с preview/API.
 
-**Это не полный перенос всех игровых модулей Encore.** Combat / Aim / SilentAim,
-No Recoil / No Spread, Chams, FreeCam, HitFX, изменения камеры, здоровья/брони,
-стрелки вне экрана и прочие неподключённые настройки показывают **`NOT PORTED`**.
-Они не включают внешние модули, не создают видимость работающих функций и не пишут
-в память по старым смещениям. Их исходники остаются в исходном `EncoreDLC3.zip`.
+**Не все пункты Encore имели backend. Полная реализация всех пунктов меню НЕ
+заявляется.** Source-less функции обозначены `NO BACKEND`; список и точные
+ограничения — **[MODULES_RU.md](MODULES_RU.md)**. Прочитай его до включения модулей.
+В частности, origin override не подтверждён как рабочий Silent Aim; визуальные
+Chams не меняют шейдеры, а screen-only фильтр не проверяет стены.
 
-Вместо ошибочного `healthOffset = 0` используется исключение локального игрока,
-`respawning`, `kicked` и снятие записи по `OnDisable`. **Надёжная проверка здоровья
-пока не портирована** — флаги не гарантируют исключение всех трупов. Высота бокса
-приблизительная (1,6 м от Transform), как в исходном DearVision, не точный скелет.
-`Player ID` — именно `userID`, не никнейм. Счётчик — записи Update за последние
-300 мс, а не гарантированное число всех игроков сервера.
+Android ARM64-сборка проверяется GitHub Actions. Успешная компиляция не является
+проверкой хуков/эффектов на телефоне. **Тестов на устройстве не было.**
 
-## Сборка
+## Два архива
 
-Нужны Python 3, Bash и Android NDK (рекомендуется r27+). Собирается native `.so`
-и ELF-загрузчик, **не APK**. Из корня репозитория:
+После успешного CI доступны артефакты:
+
+- `DearVisionRoot-arm64-untested-on-device`: `libDear.so`, `dear-loader`,
+  `run-root.sh`, инструкции, лицензии, `BUILD.txt` и `SHA256SUMS`;
+- `DearVisionRoot-source-with-dump`: ZIP исходников проекта, CI и актуального дампа.
+  Без `.git`, host-test бинарников и промежуточных сборок. Статический `libdobby.a`
+  из исходного DearVision включён как необходимая зависимость.
+
+`BUILD.txt` фиксирует commit и NDK конкретной сборки. Оба архива создаются из
+одного commit. GitHub может потребовать вход для скачивания Actions artifacts.
+
+## Сборка исходников
+
+Требуются Python 3, Bash и Android NDK r27+. Распакуй source ZIP и выполни:
 
 ```sh
 python3 DearVisionRoot/tools/offsets.py
 NDK_PATH=/path/to/android-ndk DearVisionRoot/build.sh
 ```
 
-Результат:
-
-```text
-DearVisionRoot/build/libs/arm64-v8a/libDear.so
-DearVisionRoot/build/libs/arm64-v8a/dear-loader
-```
-
-NDK-сборка использует явный список файлов: старые external, Vulkan, инжектор
-Encore и сохранённые `.bak` не подхватываются wildcard-правилами. Статический
-`libdobby.a` взят из предоставленного DearVision (это единственная сохранённая
-prebuilt-зависимость); готовый старый `libDear.so` не используется.
-
-В `.github/workflows/dearvision.yml` добавлена CI-сборка с загрузкой артефактов.
-Сборка запущена на рабочей ветке и прошла. В артефакте
-`DearVisionRoot-arm64-untested-on-device` лежат `libDear.so`, `dear-loader`,
-`run-root.sh`, инструкция, лицензии и SHA256SUMS. Артефакты доступны на вкладке
-Actions репозитория; для скачивания GitHub может потребовать вход.
+Результат: `DearVisionRoot/build/libs/arm64-v8a/libDear.so` и `dear-loader`.
+Исходные старые `libDear.so` из архивов не используются.
 
 ## Проверки на компьютере
 
@@ -64,100 +49,64 @@ Actions репозитория; для скачивания GitHub может п
 DearVisionRoot/tools/test.sh
 ```
 
-Проверяются:
-- 9 RVA и 3 поля непосредственно по `dump 1.14.11949.zip`, без распаковки 88 МБ в Git;
-- различение namespace/перегрузок, RVA и файловых Offset, отсутствие и дубликаты методов;
-- адресация загрузчика по точному пути файла и executable-сегментам `/proc/maps`;
-- Update/OnDisable, локальный игрок, respawning, истечение snapshots и копирование данных;
-- рендер всех разделов/вкладок меню без GPU в landscape/portrait, блокировка неперенесённых настроек;
-- отрицательные сценарии shell-запуска и синтаксис скриптов/загрузчика.
+Проверяются 21 RVA и 25 полей по дампу, namespace/перегрузки, отличия RVA от
+Offset, callbacks и snapshots, отключение/восстановление origin и камеры,
+scoped weapon/FOV overrides, математика Aim, схема/границы/атомарность загрузки
+профилей, события эффектов, меню portrait/landscape и root-launcher guards.
+Это host-тесты с mock API, **не эмуляция Android/Unity**.
 
-Host-тесты **не доказывают** правильность Android ABI, хуков Dobby, private input
-symbols, ptrace или работы в игре. Они не запускают и не инжектируют игру.
+## Запуск бинарной сборки
 
-## Root-запуск на своём устройстве
-
-1. Сначала собери новые файлы. Не бери старый бинарник из архивов.
-2. Размести файлы на телефоне:
-
-   ```sh
-   adb shell mkdir -p /data/local/tmp/DearVisionRoot
-   adb push DearVisionRoot/build/libs/arm64-v8a/libDear.so /data/local/tmp/DearVisionRoot/
-   adb push DearVisionRoot/build/libs/arm64-v8a/dear-loader /data/local/tmp/DearVisionRoot/
-   adb push DearVisionRoot/run-root.sh /data/local/tmp/DearVisionRoot/
-   adb shell chmod 755 /data/local/tmp/DearVisionRoot/dear-loader
-   adb shell chmod 644 /data/local/tmp/DearVisionRoot/libDear.so
-   ```
-
-3. Открой **точно соответствующую дампу** версию игры с OpenGL ES 3.
-4. Проверь скрипт без загрузки:
-
-   ```sh
-   adb shell su -c 'sh /data/local/tmp/DearVisionRoot/run-root.sh --check'
-   ```
-
-5. Загрузи библиотеку:
-
-   ```sh
-   adb shell su -c 'sh /data/local/tmp/DearVisionRoot/run-root.sh --load'
-   adb logcat -s DearVision
-   ```
-
-6. В игре нажми `DearVision / INTERNAL ROOT`, затем **Visuals → ESP → ESP Enable**.
-   `PAUSE / HIDE` выключает ESP и скрывает меню, **не завершает игру**. Для выгрузки
-   библиотеки/обновления сборки полностью перезапусти игру; hot-unload не реализован.
-
-Скрипт отказывается запускаться при другом `versionName`, отсутствии root,
-не-ARM64 устройстве и неоднозначном PID. Если игра использует другой формат версии,
-не меняй номер вслепую: сначала нужно подтвердить соответствие бинарника дампу.
-Дамп сам по себе не содержит хеша `libil2cpp.so`, поэтому **совпадение версии не
-является полной проверкой идентичности бинарника**.
-
-### Ограничения root-загрузчика
-
-Это обычный file-backed `dlopen` через ptrace, без memfd-маскировки и без изменений
-SELinux, APK, Magisk/KernelSU или настроек системы. Root сам по себе не гарантирует
-доступ к ptrace или разрешение `dlopen` в игровом linker namespace.
-
-В частности, приложение может не иметь права читать/исполнять `.so` из
-`/data/local/tmp`. При отказе загрузчик выводит `dlerror`, если его удалось прочитать.
-Можно явно задать уже подготовленный доступный игре путь:
+1. Распакуй бинарный артефакт. Открой точно соответствующую дампу версию игры
+   с **OpenGL ES 3**. Лучше сначала дождаться игрового экрана, затем загружать `.so`.
+2. Скопируй три файла на телефон:
 
 ```sh
-su -c 'DEAR_LIBRARY_PATH=/absolute/allowed/path/libDear.so sh /data/local/tmp/DearVisionRoot/run-root.sh'
+adb shell mkdir -p /data/local/tmp/DearVisionRoot
+adb push libDear.so dear-loader run-root.sh /data/local/tmp/DearVisionRoot/
+adb shell chmod 755 /data/local/tmp/DearVisionRoot/dear-loader
+adb shell chmod 644 /data/local/tmp/DearVisionRoot/libDear.so
+adb shell su -c 'sh /data/local/tmp/DearVisionRoot/run-root.sh --check'
+adb shell su -c 'sh /data/local/tmp/DearVisionRoot/run-root.sh --load'
+adb logcat -s DearVision
 ```
 
-Скрипт **не обходит** ограничения доступа и не делает SELinux permissive.
+3. Открой `DearVision / INTERNAL ROOT`. Функции, изменяющие игровой процесс,
+   по умолчанию выключены. Настройки профиля могут включить ранее сохранённые функции.
+4. `PAUSE / HIDE` выключает подключённые модули, не завершает игру. Восстановление
+   игровых полей/камеры выполняется на следующем игровом callback. Для замены
+   библиотеки или её выгрузки полностью перезапусти игру — hot-unload не поддержан.
 
-Загрузчик останавливает один поток, сохраняет general-purpose и FPSIMD регистры,
-вызывает mmap/dlopen, затем восстанавливает регистры и отсоединяется. Это
-**экспериментальная операция**: поток может держать нужный загрузчику lock, а
-таймаут/сбой посреди `dlopen` нельзя сделать полностью безопасным восстановлением
-регистров. При ошибке перезапусти игру перед повторной попыткой. Полное SVE-состояние
-не сохраняется; устройства/код, использующие SVE, не валидированы.
+Профили: кнопка **Profiles / effect preview**, New profile / Save / Load / Delete.
+Хранятся внутри игры в `files/dearvision/configs`, не `/data/local/tmp`.
+F10/Insert переключают меню при доступном keyboard input hook. FreeCam: два
+multitouch-стика, UP/DN. Касания продолжают приходить и в игру.
 
-### Ограничения рендера и касаний
+## Существенные ограничения
 
-- Поддержан только `eglSwapBuffers` / OpenGL ES 3. Vulkan не блокируется и не
-  переключается принудительно. На Vulkan меню не появится.
-- Input-хуки используют private Android symbols. На другой версии Android/OEM
-  они могут отсутствовать; тогда смотри сообщение и logcat.
-- Касания **не подавляются для игры**: взаимодействуй с меню в безопасном игровом
-  экране. Полное разделение ввода ещё не портировано.
-- В этой версии renderer привязан к первому подходящему EGL-контексту. Смена
-  поверхности в том же контексте поддерживается; после пересоздания самого
-  EGL-контекста может потребоваться перезапуск игры.
-- Нет гарантии совместимости с конкретной прошивкой или допустимости модификации
-  по правилам игры. Runtime-проверка на устройстве обязательна.
+- Root не гарантирует ptrace, доступ игрового процесса к `.so` или разрешение
+  `dlopen` в linker namespace. Загрузчик выводит диагностические ошибки и **не
+  обходит SELinux**. При необходимости явно задай уже доступный игре путь:
+  `DEAR_LIBRARY_PATH=/absolute/allowed/path/libDear.so` перед запуском скрипта.
+- Скрипт отказывается от другого/неизвестного versionName. Сверь версию и дамп,
+  не меняй проверку вслепую. Совпадение номера версии не подтверждает хеш libil2cpp.
+- Загрузчик экспериментальный: приостанавливает один поток, сохраняет GPR/FPSIMD,
+  вызывает mmap/dlopen и восстанавливает регистры. Lock/deadlock внутри dlopen
+  нельзя сделать безопасным одним восстановлением регистров. После timeout/сбоя
+  **перезапусти игру**. SVE не сохраняется; такие устройства не валидированы.
+- Только OpenGL ES 3 / eglSwapBuffers. Vulkan не отключается принудительно.
+- Private input symbols зависят от Android/OEM; при недоступности покажется ошибка.
+  Движок остаётся привязан к первому EGL context; после его пересоздания может
+  потребоваться перезапуск. Смена surface в том же context поддержана.
+- Нет гарантии эффективности игровых модулей, совместимости с прошивкой или
+  допустимости модификаций по правилам игры. Runtime-проверка обязательна.
 
-## Обновление оффсетов
+## Обновление дампа
 
 ```sh
 python3 DearVisionRoot/tools/offsets.py path/to/new/dump.cs --write
 ```
 
-Скрипт генерирует `jni/include/GameOffsets.h` из точных классов и сигнатур.
-**Internal-адрес = ELF load bias + RVA**, а не `base + Offset`. Поля объектов —
-отдельные смещения. После смены версии нужно также пересмотреть ABI, поля,
-`Target.h`, проверку версии в `run-root.sh` и документацию. Не подставляй адреса
-новой версии, сохраняя старую маркировку.
+Внутренний адрес: **ELF load bias + RVA**, не base + file Offset. Помимо таблицы
+нужно пересмотреть сигнатуры/ABI, поля, маркировку версии, `Target.h` и guard в
+`run-root.sh`. Дамп не предоставляет доказательства семантики обфусцированных полей.

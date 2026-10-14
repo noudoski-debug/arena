@@ -5,7 +5,7 @@
 - Dobby ARM64 static archive and header were supplied in `@dearvision.zip`.
   Dobby upstream is jmpews/Dobby (Apache-2.0; see licenses/Dobby.txt).
   The exact build revision/options of the supplied archive are unknown.
-- `jni/include/encore/LitvinMenu.h`, `HitEffect.h` and `Vars.h` are adapted from
+- `jni/include/encore/LitvinMenu.h`, `HitEffect.h`, `Vars.h` and `Chams.cpp`/`Chams.h` are adapted from
   the user-supplied `EncoreDLC3.zip`. Original credits/comments are retained;
   no additional license for these files was provided in that archive.
 - The original DearVision archive attributes its source to xdl_open / @dearvision.

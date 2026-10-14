@@ -1,5 +1,10 @@
 #pragma once
+#include <vector>
 namespace input {
+struct Touch { int id; float x,y; };
 bool install();
-void pump(); // Render thread only; never access ImGui from input callbacks.
+void pump();
+std::vector<Touch> touches();
+bool isDown(int linuxCode);
+bool consumeMenuToggle();
 }

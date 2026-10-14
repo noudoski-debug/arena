@@ -304,7 +304,7 @@ inline std::vector<Section>& Sections() {
             { "AimBot", {
                 T  ("AimBot Enable",    &Vars.Aimbot.enableAimbot),
                 T  ("Scope Only",       &Vars.Aimbot.scopeCheck),
-                T  ("Visible Only",     &Vars.Aimbot.visibleOnly),
+                T  ("On-screen Only",     &Vars.Aimbot.visibleOnly),
                 T  ("Draw FOV",         &Vars.Aimbot.drawfov),
                 T  ("FOV Check",        &Vars.Aimbot.fovcheck),
                 SlF("FOV",              &Vars.Aimbot.fov,        30.f,400.f,"%.0f"),
@@ -314,8 +314,8 @@ inline std::vector<Section>& Sections() {
                 Sel("Target Bone",      &Vars.Aimbot.selectedBoneIndex, OPT(kBone)),
             }},
             { "SilentAim", {
-                T  ("Silent Aim (Magic Bullets)", &Vars.Aimbot.silentAim),
-                T  ("Visible Only",     &Vars.Aimbot.silentVisibleOnly),
+                T  ("Origin Override (EXPERIMENT)", &Vars.Aimbot.silentAim),
+                T  ("On-screen Only",     &Vars.Aimbot.silentVisibleOnly),
                 T  ("Scope Only",       &Vars.Aimbot.silentScopeCheck),
                 SlF("Silent FOV",       &Vars.Aimbot.silentFov,   30.f,400.f,"%.0f"),
                 Sel("Target Bone",      &Vars.Aimbot.silentBoneIndex, OPT(kBone)),
@@ -334,8 +334,8 @@ inline std::vector<Section>& Sections() {
                 T("Box ESP",             &Vars.ESP.box),
                 T("Player ID",           &Vars.ESP.name),
                 T("Distance",            &Vars.ESP.distance),
-                T("Health Bar",          &Vars.ESP.healthbar),
-                T("Armor Bar",           &Vars.ESP.armorbar),
+                T("Health Bar (no source)",          &Vars.ESP.healthbar),
+                T("Armor Bar (no source)",           &Vars.ESP.armorbar),
                 T("Tracer",              &Vars.ESP.tracer),
                 T("Off-Screen Arrows",   &Vars.ESP.outOfScreen),
                 T("X-Ray Fill",          &Vars.ESP.xrayFill),
@@ -350,7 +350,7 @@ inline std::vector<Section>& Sections() {
             }},
             { "Chams", {
                 T  ("Enable Chams",     &Vars.Chams.enable),
-                T  ("Through Walls",    &Vars.Chams.throughWalls),
+                T  ("Include Screen-Filtered",    &Vars.Chams.throughWalls),
                 Sel("Material",         &Vars.Chams.material, OPT(kMaterial)),
                 SlF("Opacity",          &Vars.Chams.opacity,  0.05f,1.f,"%.2f"),
                 Col3("Visible Color",   &Vars.Chams.r, &Vars.Chams.g, &Vars.Chams.b),
@@ -393,7 +393,7 @@ inline std::vector<Section>& Sections() {
             { "FreeCam", {
                 T  ("Enable FreeCam",  &Vars.FreeCam.enable),
                 SlF("Flight Speed",    &Vars.FreeCam.speed, 1.f, 50.f, "%.1f"),
-                Lbl("Joystick shown when camera found"),
+                Lbl("Internal camera / sticks + up-down"),
                 Lbl("Left  = Move  /  Right = Look"),
             }},
         }},
@@ -404,7 +404,7 @@ inline std::vector<Section>& Sections() {
             }},
             { "Config", {
                 SlF("ESP Corner Radius", &Vars.Settings.espround, 0.f,16.f,"%.1f"),
-                SlF("Camera FOV",        &Vars.Settings.camFov,   30.f,100.f,"%.1f"),
+                SlF("External FOV (unused)", &Vars.Settings.camFov,   30.f,100.f,"%.1f"),
                 T  ("Aspect Ratio",      &Vars.Player.aspect_ratio),
                 SlF("Aspect Value",      &Vars.Player.aspect_value, 0.5f,2.5f,"%.2f"),
             }},
@@ -417,14 +417,25 @@ inline std::vector<Section>& Sections() {
 //  DRAW ROWS
 // ============================================================================
 inline bool Supported(const Row& r) {
-    return r.type == R_LABEL ||
-        (r.b && (r.b == &Vars.ESP.enable || r.b == &Vars.ESP.box ||
-                 r.b == &Vars.ESP.name || r.b == &Vars.ESP.distance ||
-                 r.b == &Vars.ESP.tracer || r.b == &Vars.ESP.xrayFill ||
-                 r.b == &Vars.ESP.count || r.b == &Vars.ESP.outline)) ||
-        (r.iv && r.iv == &Vars.Settings.theme) ||
-        (r.fv && (r.fv == &Vars.Settings.espround || r.fv == &Vars.ESP.lineThickness ||
-                  r.fv == &Vars.ESP.boxColor[0] || r.fv == &Vars.ESP.lineColor[0]));
+    if (r.type==R_LABEL) return true;
+    if (r.iv) return r.iv==&Vars.Settings.theme || r.iv==&Vars.Aimbot.selectedBoneIndex ||
+        r.iv==&Vars.Aimbot.silentBoneIndex || r.iv==&Vars.Chams.material;
+    if (r.b) return r.b==&Vars.ESP.enable || r.b==&Vars.ESP.box || r.b==&Vars.ESP.name ||
+        r.b==&Vars.ESP.distance || r.b==&Vars.ESP.tracer || r.b==&Vars.ESP.xrayFill ||
+        r.b==&Vars.ESP.count || r.b==&Vars.ESP.outline || r.b==&Vars.ESP.outOfScreen ||
+        r.b==&Vars.Aimbot.enableAimbot || r.b==&Vars.Aimbot.scopeCheck || r.b==&Vars.Aimbot.visibleOnly ||
+        r.b==&Vars.Aimbot.drawfov || r.b==&Vars.Aimbot.fovcheck || r.b==&Vars.Aimbot.silentAim ||
+        r.b==&Vars.Aimbot.silentScopeCheck || r.b==&Vars.Aimbot.silentVisibleOnly ||
+        r.b==&Vars.Player.norecoil || r.b==&Vars.Player.nospread || r.b==&Vars.Player.armfov ||
+        r.b==&Vars.Player.camerafov || r.b==&Vars.Player.aspect_ratio || r.b==&Vars.FreeCam.enable ||
+        r.b==&Vars.Chams.enable || r.b==&Vars.Chams.throughWalls;
+    if (r.fv) return r.fv==&Vars.Settings.espround || r.fv==&Vars.ESP.lineThickness ||
+        r.fv==&Vars.ESP.boxColor[0] || r.fv==&Vars.ESP.lineColor[0] || r.fv==&Vars.ESP.arrowRadius ||
+        r.fv==&Vars.Aimbot.fov || r.fv==&Vars.Aimbot.smooth || r.fv==&Vars.Aimbot.maxDistance ||
+        r.fv==&Vars.Aimbot.silentFov || r.fv==&Vars.Player.armfovValue || r.fv==&Vars.Player.customFov ||
+        r.fv==&Vars.Player.aspect_value || r.fv==&Vars.FreeCam.speed || r.fv==&Vars.Chams.opacity ||
+        r.fv==&Vars.Chams.r || r.fv==&Vars.Chams.wr;
+    return false;
 }
 
 inline void DrawRows(std::vector<Row>& rows, const pal::Theme& T) {
@@ -458,7 +469,7 @@ inline void DrawRows(std::vector<Row>& rows, const pal::Theme& T) {
                        WithAlpha(T.LINE,0.5f));
 
         if (!Supported(r)) {
-            const char* pending = "NOT PORTED";
+            const char* pending = "NO BACKEND";
             const ImVec2 ts = ImGui::CalcTextSize(pending);
             d->AddText(ImVec2(right-ts.x, cy-ts.y*0.5f), T.DIM, pending);
             ImGui::PopID();
