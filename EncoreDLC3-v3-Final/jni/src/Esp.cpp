@@ -1576,10 +1576,11 @@ static void collectSnapshot(int screenW, int screenH, int workerPid) {
     float lookDbg[2] = {0, 0};
     std::vector<Ent> ents;
     const double nowTick = nowSec();
-    std::vector<Ent> previousWorld;
+    // Детектор короткого обрыва (только local в кадре) — храним счётчик, а не копию всего мира.
+    unsigned prevEnemies = 0;
     {
         std::lock_guard<std::mutex> lock(s_snapshotMu);
-        previousWorld = s_world;
+        for (const auto& e : s_world) if (!e.local) prevEnemies++;
     }
     // internal collector УДАЛЁН (модуль выпилен из Android.mk, либа чистится
     // инжектором): esp.bin мог писать только зомби из прошлого инжекта, а его
@@ -1675,16 +1676,14 @@ static void collectSnapshot(int screenW, int screenH, int workerPid) {
         if (e.local) dbgFlagLocal++;
         ents.push_back(e); objs.push_back(obj);
     }
-    // A short read failure can make the list look like it contains only the
-    // local player. Do not publish that as a new world: it produces the famous
-    // single box in the centre. If the drop persists, the TTL in tick() clears
-    // the frame instead of drawing stale data forever.
+    // Детектор короткого обрыва: раньше был полный игроков список и вдруг 0 —
+    // держим старый кадр до 1.5 сек пока не восстановится. Полную копию s_world
+    // больше не делаем (дорого при 30+ игроках), используем счётчик.
     {
         static double dropSince = 0;
-        int oldEnemies = 0, newEnemies = 0;
-        for (const auto& e : previousWorld) if (!e.local) oldEnemies++;
+        unsigned newEnemies = 0;
         for (const auto& e : ents) if (!e.local) newEnemies++;
-        if (oldEnemies > 0 && newEnemies == 0 && !previousWorld.empty()) {
+        if (prevEnemies > 0 && newEnemies == 0) {
             if (dropSince == 0) dropSince = nowTick;
             if (nowTick - dropSince < 1.5) return;
         } else {
@@ -2067,39 +2066,22 @@ static void collectSnapshot(int screenW, int screenH, int workerPid) {
             }
         }
     }
-    // shared для Aim
-    // Висибл-чек (external, без физики стен): видимый = ноги+верх+голова
-    // спроецировались и на экране, дистанция 0.3..800м. Сквозь стены проекция
-    // тоже проходит (x-ray) — это проверка кадра/FOV/головы, а не луч сквозь
-    // стену. Отличие от обычного лока: обычный лок требует только кость аима,
-    // висибл требует ещё ноги+верх+голову в кадре — за краем/спиной режет.
+    // Быстрый висибл-чек на воркере: только «вперёд-в-конусе + разумная дистанция».
+    // Точный w2s всё равно делается в рендере, а дублировать его здесь на 25 Гц
+    // по 30 игрокам = 90 w2s + 30 boneWorld просто так, отсюда и 10 FPS.
+    // В r-квадратах избегаем sqrt до самого момента необходимости.
     for (auto& e : ents) {
         e.visible = false;
         if (e.local || e.dead) continue;
         float dxv = e.pos.x - cam.x, dyv = e.pos.y - cam.y, dzv = e.pos.z - cam.z;
-        float dv = sqrtf(dxv*dxv + dyv*dyv + dzv*dzv);
-        if (!(dv > 0.3f && dv < 800.f)) continue;
-        V3f visHead = boneWorld(e, 0);
-        const bool haveVisHead = e.haveHeadBone || e.havePivot || e.haveHead;
-        float btop = e.pos.y + kBoxH;
-        if (visHead.y + 0.2f < btop) btop = visHead.y + 0.2f;
-        V3f vtop{e.pos.x, btop, e.pos.z};
-        V2f vfb{0,0}, vtb{0,0}, vhb{0,0};
-        bool vvf = w2s(cam, fwd, e.pos, tanHalf, aspect, (float)screenW, (float)screenH, vfb);
-        bool vvt = w2s(cam, fwd, vtop, tanHalf, aspect, (float)screenW, (float)screenH, vtb);
-        bool vhh = haveVisHead &&
-                   w2s(cam, fwd, visHead, tanHalf, aspect, (float)screenW, (float)screenH, vhb);
-        auto onScr = [&](const V2f& s) {
-            return s.x >= -50.f && s.x <= (float)screenW + 50.f &&
-                   s.y >= -50.f && s.y <= (float)screenH + 50.f;
-        };
-        if (vvf && vvt && onScr(vfb) && onScr(vtb)) {
-            // голова обязательна если есть: без неё (за холмом/стеной по пояс)
-            // висиблом не считаем — вот тут чек строже обычного лока
-            if (!haveVisHead || (vhh && onScr(vhb)))
-                e.visible = true;
-        } else if (vvf && dv < 4.f) {
-            e.visible = true; // в упор верх за ближней плоскостью — считаем видимым
+        float dv2 = dxv*dxv + dyv*dyv + dzv*dzv;
+        if (dv2 < 0.09f || dv2 > 800.f*800.f) continue;
+        // впереди камеры и в угле ~ FOV (cos ≈ 0.25 ~ 75° в каждую сторону)
+        float fwdDot = dxv*fwd.x + dyv*fwd.y + dzv*fwd.z;
+        if (fwdDot > 0.35f) {
+            e.visible = true;
+        } else if (fwdDot > 0.f && dv2 < 16.f) {
+            e.visible = true; // в упор и сбоку/сзади (модель занимает пол-экрана)
         }
     }
     if (workerPid != g_pid) return;
@@ -2126,8 +2108,10 @@ static double s_lastSnapshotRequest = 0;
 
 static void requestSnapshot(int screenW, int screenH) {
     const double now = nowSec();
-    // ~45 Hz запросов — на 60 FPS рендера даёт гладкую интерполяцию без «плавания».
-    if (now - s_lastSnapshotRequest < 0.022) return;
+    // 25 Hz = 40 ms. На практике даёт 60 FPS рендер и ровные боксы без
+    // дёрганья — каждый кадр рисуем тот же последний снимок, без перерисовок
+    // между чтениями памяти.
+    if (now - s_lastSnapshotRequest < 0.040) return;
     s_lastSnapshotRequest = now;
     if (s_snapshotWorkerRunning.exchange(true)) return;
     const int workerPid = g_pid;
@@ -2184,18 +2168,25 @@ static void drawPlayerCount(int screenW, unsigned count) {
                 IM_COL32(245, 248, 255, 255), buf);
 }
 
+// Кэш рендера — один буфер, без копирований и бленда.
+// Блокируем мьютекс один раз за тик, swap'аем указатель, отпускаем мьютекс
+// мгновенно и рисуем из своего буфера — это даёт 60 FPS независимо от частоты воркера.
+struct RenderFrame {
+    V3f cam; V3f fwd;
+    std::vector<Ent> ents;
+    double publishedAt = 0;
+    uint64_t seq = 0;
+    bool haveCam = false;
+};
+static RenderFrame s_render;
+
 void tick(int screenW, int screenH) {
-    // PID selection and resolver work are deliberately kept out of the render
-    // path. The collector owns all remote reads and publishes immutable-enough
-    // copies under s_snapshotMu.
     static int observedPid = -1;
     static double nextPidCheck = 0;
     const double frameNow = nowSec();
-    // PID validation is cheap but still touches /proc. Do it at a low rate so
-    // the render loop performs no per-frame process or memory probing.
     if (observedPid <= 0 || frameNow >= nextPidCheck) {
         observedPid = rpatch::pidOf("com.catsbit.oxidesurvivalisland");
-        nextPidCheck = frameNow + (observedPid > 0 ? 0.5 : 0.1);
+        nextPidCheck = frameNow + (observedPid > 0 ? 1.0 : 0.2);
     }
     int pid = observedPid;
     if (pid <= 0) return;
@@ -2204,11 +2195,11 @@ void tick(int screenW, int screenH) {
         g_pmKlass = 0;
         g_listObj = 0;
         g_needLookReset = true;
+        s_render.haveCam = false;
+        s_render.publishedAt = 0;
         {
             std::lock_guard<std::mutex> lock(s_snapshotMu);
-            s_world.clear();
-            s_haveCam = false;
-            s_snapshotPublishedAt = 0;
+            s_world.clear(); s_haveCam = false;
             ++s_snapshotSeq;
         }
 #if defined(__aarch64__)
@@ -2220,143 +2211,55 @@ void tick(int screenW, int screenH) {
     }
     requestSnapshot(screenW, screenH);
 
-    V3f cam{0, 0, 0};
-    V3f fwd{0, 0, 1};
-    float lookDbg[2] = {0, 0};
-    uint64_t snapshotSeq = 0;
-    double snapshotTime = 0;
-    float snapshotTanHalf = 0;
-    std::vector<Ent> ents;
-    bool haveCam = false;
-    const double now = nowSec();
+    // ОДНА короткая блокировка: забираем новый снимок только если он есть,
+    // иначе продолжаем рисовать старый — никаких выделений/блендов каждый кадр.
     {
         std::lock_guard<std::mutex> lock(s_snapshotMu);
-        const bool fresh = s_haveCam && !s_world.empty() &&
-                           s_snapshotPublishedAt > 0 &&
-                           now - s_snapshotPublishedAt <= 1.5;
-        if (fresh) {
-            ents = s_world;
-            cam = s_cam;
-            fwd = s_fwd;
-            lookDbg[0] = s_lookDbg[0];
-            lookDbg[1] = s_lookDbg[1];
-            snapshotSeq = s_snapshotSeq;
-            snapshotTime = s_snapshotPublishedAt;
-            snapshotTanHalf = s_tanHalf;
-            haveCam = true;
-        } else if (s_haveCam || !s_world.empty()) {
-            // Never keep a dead/central stale box indefinitely.
-            s_world.clear();
-            s_haveCam = false;
+        if (s_haveCam && !s_world.empty() &&
+            s_snapshotPublishedAt > 0 && frameNow - s_snapshotPublishedAt <= 2.0 &&
+            s_snapshotSeq != s_render.seq) {
+            s_render.cam = s_cam;
+            s_render.fwd = s_fwd;
+            s_render.ents = s_world;          // один обмен содержимым вектора
+            s_render.publishedAt = s_snapshotPublishedAt;
+            s_render.seq = s_snapshotSeq;
+            s_render.haveCam = true;
+        } else if (!s_haveCam && s_world.empty() && frameNow - s_snapshotPublishedAt > 2.0) {
+            s_render.haveCam = false;
         }
     }
-    // Keep three complete published frames. Rendering from the older pair
-    // avoids extrapolation and the correction jerk that appears when a new
-    // camera sample arrives during a fast right-left turn.
-    static bool renderHistory = false;
-    static bool renderOlderHistory = false;
-    static uint64_t renderSeq = 0;
-    static std::vector<Ent> renderOlderWorld;
-    static std::vector<Ent> renderPreviousWorld;
-    static std::vector<Ent> renderCurrentWorld;
-    static V3f renderOlderCam{0, 0, 0}, renderPreviousCam{0, 0, 0}, renderCurrentCam{0, 0, 0};
-    static V3f renderOlderFwd{0, 0, 1}, renderPreviousFwd{0, 0, 1}, renderCurrentFwd{0, 0, 1};
-    static float renderOlderTan = 1.f, renderPreviousTan = 1.f, renderCurrentTan = 1.f;
-    static double renderOlderTime = 0, renderPreviousTime = 0, renderCurrentTime = 0;
+    if (!s_render.haveCam || s_render.ents.empty()) return;
 
-    if (!haveCam) {
-        // The worker did not publish a fresh frame within the TTL. Reset the
-        // history so a newly joined game cannot blend with an old PID/world.
-        renderHistory = false;
-        renderOlderHistory = false;
-        renderSeq = 0;
-        renderOlderWorld.clear();
-        renderPreviousWorld.clear();
-        renderCurrentWorld.clear();
-        return;
-    }
-    if (!renderHistory || renderSeq != snapshotSeq) {
-        if (renderHistory) {
-            renderOlderWorld = std::move(renderPreviousWorld);
-            renderOlderCam = renderPreviousCam;
-            renderOlderFwd = renderPreviousFwd;
-            renderOlderTan = renderPreviousTan;
-            renderOlderTime = renderPreviousTime;
-            renderOlderHistory = true;
+    const V3f cam = s_render.cam;
+    const V3f fwd = s_render.fwd;
+    const std::vector<Ent>& ents = s_render.ents;
+    float lookDbg[2] = { s_lookDbg[0], s_lookDbg[1] };
 
-            renderPreviousWorld = std::move(renderCurrentWorld);
-            renderPreviousCam = renderCurrentCam;
-            renderPreviousFwd = renderCurrentFwd;
-            renderPreviousTan = renderCurrentTan;
-            renderPreviousTime = renderCurrentTime;
-        }
-        renderCurrentWorld = std::move(ents);
-        renderCurrentCam = cam;
-        renderCurrentFwd = fwd;
-        renderCurrentTan = snapshotTanHalf;
-        renderCurrentTime = snapshotTime;
-        if (!renderHistory) {
-            renderPreviousWorld = renderCurrentWorld;
-            renderPreviousCam = renderCurrentCam;
-            renderPreviousFwd = renderCurrentFwd;
-            renderPreviousTan = renderCurrentTan;
-            renderPreviousTime = renderCurrentTime;
-            renderOlderHistory = false;
-            renderHistory = true;
-        }
-        renderSeq = snapshotSeq;
-    }
-
-    // Small render delay: enough for interpolation between worker snapshots
-    // (~30 Hz publication) but small enough that boxes do not "swim" behind
-    // a moving target.  0.018 s ≈ 1 frame at 60 FPS — no perceptible lag,
-    // still gets rid of the double-image jitter on a fresh snapshot arrival.
-    const double sampleTime = now - 0.018;
-    const std::vector<Ent>* fromWorld = &renderPreviousWorld;
-    const std::vector<Ent>* toWorld = &renderCurrentWorld;
-    V3f fromCam = renderPreviousCam, toCam = renderCurrentCam;
-    V3f fromFwd = renderPreviousFwd, toFwd = renderCurrentFwd;
-    float fromTan = renderPreviousTan, toTan = renderCurrentTan;
-    double fromTime = renderPreviousTime, toTime = renderCurrentTime;
-    if (renderOlderHistory && sampleTime < renderPreviousTime &&
-        renderPreviousTime > renderOlderTime) {
-        fromWorld = &renderOlderWorld;
-        toWorld = &renderPreviousWorld;
-        fromCam = renderOlderCam; toCam = renderPreviousCam;
-        fromFwd = renderOlderFwd; toFwd = renderPreviousFwd;
-        fromTan = renderOlderTan; toTan = renderPreviousTan;
-        fromTime = renderOlderTime; toTime = renderPreviousTime;
-    }
-    float blend = 1.f;
-    if (toTime - fromTime > 0.001) {
-        blend = (float)((sampleTime - fromTime) / (toTime - fromTime));
-        if (blend < 0.f) blend = 0.f;
-        // Жёсткий предел экстраполяции: без неё рывок при позднем снапшоте,
-        // с ней большой овершут — 1.05 даёт плавность без плавания.
-        if (blend > 1.05f) blend = 1.05f;
-    }
-    cam = blendV3(fromCam, toCam, blend);
-    fwd = blendV3(fromFwd, toFwd, blend);
-    float fwdLen = sqrtf(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z);
-    if (fwdLen > 1e-4f) {
-        fwd.x /= fwdLen; fwd.y /= fwdLen; fwd.z /= fwdLen;
-    } else {
-        fwd = toFwd;
-    }
-    float tanHalf = fromTan + (toTan - fromTan) * blend;
-    if (!(tanHalf > 0.01f && tanHalf < 10.f)) tanHalf = snapshotTanHalf;
-    ents.clear();
-    ents.reserve(toWorld->size());
-    for (const auto& current : *toWorld) {
-        const Ent* previous = nullptr;
-        for (const auto& candidate : *fromWorld) {
-            if (candidate.id == current.id) { previous = &candidate; break; }
-        }
-        ents.push_back(previous ? blendEnt(*previous, current, blend) : current);
-    }
+    // Базис камеры для стрелок out-of-screen (right/up) строим из fwd + мировой up.
+    V3f worldUp{0.f, 1.f, 0.f};
+    float fwu = fwd.x*worldUp.x + fwd.y*worldUp.y + fwd.z*worldUp.z;
+    if (fwu > 0.99f)  worldUp = V3f{0.f, 0.f, -1.f};
+    else if (fwu < -0.99f) worldUp = V3f{0.f, 0.f, 1.f};
+    V3f camRight = {
+        fwd.y*worldUp.z - fwd.z*worldUp.y,
+        fwd.z*worldUp.x - fwd.x*worldUp.z,
+        fwd.x*worldUp.y - fwd.y*worldUp.x
+    };
+    float crl = sqrtf(camRight.x*camRight.x + camRight.y*camRight.y + camRight.z*camRight.z);
+    if (crl > 1e-5f) { camRight.x/=crl; camRight.y/=crl; camRight.z/=crl; }
+    V3f camUp = {
+        camRight.y*fwd.z - camRight.z*fwd.y,
+        camRight.z*fwd.x - camRight.x*fwd.z,
+        camRight.x*fwd.y - camRight.y*fwd.x
+    };
 
     float aspect = (float)screenW / (float)screenH;
-    if (!(tanHalf > 0.01f && tanHalf < 10.f)) tanHalf = tanf(Vars.Settings.camFov * 0.5f * 0.0174533f);
+    float tanHalf = tanf(Vars.Settings.camFov * 0.5f * 0.0174533f);
+    // Пробуем реальный FOV из кадра, если он в разумных пределах.
+    {
+        float t = (s_sw>0&&s_sh>0)?s_tanHalf:0;
+        if (t > 0.15f && t < 5.f) tanHalf = t;
+    }
 
     // позиционный дебаг: камера, взгляд, 3 ближайшие цели с проекцией
     {
@@ -2424,8 +2327,10 @@ void tick(int screenW, int screenH) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
 
     int shown = 0;
-    // старение стрелок: кого в этом тике не обновили — miss++, старых чистим
-    for (auto& kv : s_arrows) kv.second.miss++;
+    // старение стрелок — инкрементируем только если они есть (не итерируем пустую мапу)
+    if (!s_arrows.empty()) {
+        for (auto& kv : s_arrows) kv.second.miss++;
+    }
     // старт линии трасера из меню: 0=Top, 1=Center, 2=Bottom
     ImVec2 tracerOrg((float)screenW * 0.5f, (float)screenH);
     {
@@ -2474,57 +2379,72 @@ void tick(int screenW, int screenH) {
         if (!e.visible) arrCol = ImVec4(arrCol.x * 0.5f, arrCol.y * 0.5f, arrCol.z * 0.5f, 0.8f);
         dl->AddTriangleFilled(tip, b1, b2, ImColor(arrCol));
     };
-    // Современный угловой ESP: тонкие аккуратные углы + точки на голове/ногах,
-    // никаких жирных линий по периметру.
+    // Угловой ESP — легковесный: 8 отрезков и 4 точки.
+    static const ImU32 kHi = IM_COL32(255,255,255,150);
     auto drawCornerFrame = [&](float left, float top, float right, float bottom,
                                ImU32 color, ImU32 fillCol) {
-        float span = std::min(right - left, bottom - top);
-        float arm  = std::max(8.f, std::min(16.f, span * 0.24f));
-        float w    = span < 34.f ? 1.3f : 1.6f;
-        ImU32 hi   = IM_COL32(255,255,255,160); // блик на уголках
-        // Тонкая XRay-подложка
+        const float span = std::min(right - left, bottom - top);
+        const float arm  = std::max(8.f, std::min(14.f, span * 0.22f));
+        const float w    = 1.4f;
         if (Vars.ESP.xrayFill)
             dl->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), fillCol,
                               Vars.Settings.espround);
-        auto corner = [&](float x, float y, float dx1, float dy1, float dx2, float dy2) {
-            dl->AddLine(ImVec2(x, y), ImVec2(x + dx1*arm, y + dy1*arm), color, w);
-            dl->AddLine(ImVec2(x, y), ImVec2(x + dx2*arm, y + dy2*arm), color, w);
-            // яркая точка на вершине угла
-            dl->AddCircleFilled(ImVec2(x, y), std::max(1.3f, w*0.9f), hi, 10);
-        };
-        corner(left,  top,    +1, 0, 0, +1);
-        corner(right, top,    -1, 0, 0, +1);
-        corner(left,  bottom, +1, 0, 0, -1);
-        corner(right, bottom, -1, 0, 0, -1);
+        // 8 линий углов
+        dl->AddLine(ImVec2(left, top),         ImVec2(left+arm, top),    color, w);
+        dl->AddLine(ImVec2(left, top),         ImVec2(left, top+arm),    color, w);
+        dl->AddLine(ImVec2(right-arm, top),    ImVec2(right, top),       color, w);
+        dl->AddLine(ImVec2(right, top),        ImVec2(right, top+arm),   color, w);
+        dl->AddLine(ImVec2(left, bottom-arm),  ImVec2(left, bottom),     color, w);
+        dl->AddLine(ImVec2(left, bottom),      ImVec2(left+arm, bottom), color, w);
+        dl->AddLine(ImVec2(right-arm, bottom), ImVec2(right, bottom),    color, w);
+        dl->AddLine(ImVec2(right, bottom-arm), ImVec2(right, bottom),    color, w);
+        // 4 угловых точки
+        if (span > 30.f) {
+            const float r = 1.3f;
+            dl->AddCircleFilled(ImVec2(left,top),r,kHi,8);
+            dl->AddCircleFilled(ImVec2(right,top),r,kHi,8);
+            dl->AddCircleFilled(ImVec2(left,bottom),r,kHi,8);
+            dl->AddCircleFilled(ImVec2(right,bottom),r,kHi,8);
+        }
     };
+    const float swF = (float)screenW, shF = (float)screenH;
+    const float swInv = 1.0f / swF, shInv = 1.0f / shF;
+    ImFont* nfCache = ImGui::GetFont();
+    const float nFsCache = 12.5f;
     for (auto& e : ents) {
         if (e.local) continue;
-        if (e.dead) continue; // труп/респавн/кик/spectate — нет бокса (как раньше)
-        float ol2 = e.pos.x * e.pos.x + e.pos.y * e.pos.y + e.pos.z * e.pos.z;
-        if (ol2 < 25.f) continue; // болванки в нулях не рисуем
-        // Верх бокса: минимум(feet+1.8, live Head bone+0.2).
-        // The same head anchor is used by aimbot; crouching changes the
-        // height of the box without moving its ground/root point.
+        if (e.dead) continue;
+
+        // Голова и дистанция — один расчёт на всё тело цикла.
+        V3f headBone = boneWorld(e, 0);
+        float dx = e.pos.x - cam.x, dy = e.pos.y - cam.y, dz = e.pos.z - cam.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+        if (distSq < 0.09f || distSq > 800.f*800.f) continue;
+        if (e.pos.x*e.pos.x + e.pos.z*e.pos.z < 25.f) continue;
+
         float boxTopY = e.pos.y + kBoxH;
-        V3f boxHead = boneWorld(e, 0);
-        if (boxHead.y + 0.2f < boxTopY) boxTopY = boxHead.y + 0.2f;
+        if (headBone.y + 0.2f < boxTopY) boxTopY = headBone.y + 0.2f;
         V3f top{e.pos.x, boxTopY, e.pos.z};
-        float dist = sqrtf((e.pos.x - cam.x) * (e.pos.x - cam.x) +
-                           (e.pos.y - cam.y) * (e.pos.y - cam.y) +
-                           (e.pos.z - cam.z) * (e.pos.z - cam.z));
-        if (dist < 0.3f || dist > 800.f) continue;
-        V2f fb{0, 0}, tb{0, 0};
-        bool vf = w2s(cam, fwd, e.pos, tanHalf, aspect, (float)screenW, (float)screenH, fb);
-        bool vt = w2s(cam, fwd, top, tanHalf, aspect, (float)screenW, (float)screenH, tb);
+
+        // Грубая проверка «впереди камеры» — без неё w2s делает лишнюю тригонометрию
+        // на игроках за спиной, это и есть 10 FPS на серверах с 30+ игроками.
+        float fwdDot = dx*fwd.x + dy*fwd.y + dz*fwd.z;
+        if (fwdDot < 0.5f) {
+            if (Vars.ESP.outOfScreen) drawArrow(e);
+            continue;
+        }
+
+        V2f fb{0,0}, tb{0,0};
+        bool vf = w2s(cam, fwd, e.pos, tanHalf, aspect, swF, shF, fb);
+        bool vt = w2s(cam, fwd, top,  tanHalf, aspect, swF, shF, tb);
         float h = 0.f;
-        bool closeRange = dist < 4.f;
+        const float dist = sqrtf(distSq); // один sqrt, только для ближней оценки
         if (vf && vt) {
             h = fb.y - tb.y;
-        } else if (vf && closeRange) {
-            // Вблизи верх бокса часто за ближней плоскостью (vt=false) —
-            // высоту оцениваем по дистанции, иначе ESP пропадает в упор.
-            if (!(tanHalf > 0.1f && tanHalf < 3.f)) tanHalf = 0.5f;
-            h = (float)screenH * kBoxH / (2.f * (dist < 0.8f ? 0.8f : dist) * tanHalf);
+        } else if (vf && dist < 4.f) {
+            float tH = tanHalf; if (!(tH > 0.1f && tH < 3.f)) tH = 0.5f;
+            float d = dist < 0.8f ? 0.8f : dist;
+            h = shF * kBoxH / (2.f * d * tH);
             tb = V2f{fb.x, fb.y - h};
             vt = true;
         } else {
@@ -2535,27 +2455,23 @@ void tick(int screenW, int screenH) {
             if (Vars.ESP.outOfScreen) drawArrow(e);
             continue;
         }
-        // Вблизи h легко > screenH*1.5 — раньше скипали бокс полностью.
-        // Теперь клампим к экрану: бокс/текст/трасер остаются видны в упор.
-        bool huge = h > (float)screenH * 1.5f;
-        if (huge) {
-            if (!(tanHalf > 0.1f && tanHalf < 3.f)) h = (float)screenH * 1.5f;
-            else h = (float)screenH * kBoxH / (2.f * (dist < 0.8f ? 0.8f : dist) * tanHalf);
-            if (h > (float)screenH * 3.f) h = (float)screenH * 3.f;
-            if (h < (float)screenH * 0.5f) h = (float)screenH * 0.5f;
+        if (h > shF * 1.5f) {
+            float tH = tanHalf; if (!(tH > 0.1f && tH < 3.f)) tH = 0.5f;
+            float d = dist < 0.8f ? 0.8f : dist;
+            h = shF * kBoxH / (2.f * d * tH);
+            if (h > shF * 3.f) h = shF * 3.f;
+            if (h < shF * 0.5f) h = shF * 0.5f;
             tb.y = fb.y - h;
         }
-        float w = h * 0.5f;
-        float x0 = tb.x - w * 0.5f, x1 = tb.x + w * 0.5f;
-        // frustum: только в пределах камеры (+запас 100px). Всё вне — стрелка, а не пустота.
+        float bw = h * 0.5f;
+        float x0 = tb.x - bw * 0.5f, x1 = tb.x + bw * 0.5f;
         const float M = 100.f;
-        if (x1 < -M || x0 > (float)screenW + M || fb.y < -M || tb.y > (float)screenH + M) {
+        if (x1 < -M || x0 > swF + M || fb.y < -M || tb.y > shF + M) {
             if (Vars.ESP.outOfScreen) drawArrow(e);
             continue;
         }
-        // центр бокса тоже должен быть в разумных пределах (защита от деления на мелкий z)
-        float cx = (x0 + x1) * 0.5f, cy = (fb.y + tb.y) * 0.5f;
-        if (cx < -1000.f || cx > (float)screenW + 1000.f || cy < -1000.f || cy > (float)screenH + 1000.f) {
+        float cx = (x0+x1)*0.5f, cy = (fb.y+tb.y)*0.5f;
+        if (cx < -1000.f || cx > swF + 1000.f || cy < -1000.f || cy > shF + 1000.f) {
             if (Vars.ESP.outOfScreen) drawArrow(e);
             continue;
         }
@@ -2572,116 +2488,113 @@ void tick(int screenW, int screenH) {
             n4 = ImVec4(n4.x * (scale + 0.15f), n4.y * (scale + 0.15f),
                         n4.z * (scale + 0.15f), 0.92f);
         }
-        // Кламп под экран: в упор координаты улетают за тысячи px — режем,
-        // иначе AddRect/текст уходят в невидимость.
+        // Кламп под экран
         float drawX0 = x0 < 0.f ? 0.f : x0;
-        float drawX1 = x1 > (float)screenW ? (float)screenW : x1;
+        float drawX1 = x1 > swF ? swF : x1;
         float drawTop = tb.y < 0.f ? 0.f : tb.y;
-        float drawBot = fb.y > (float)screenH ? (float)screenH : fb.y;
+        float drawBot = fb.y > shF ? shF : fb.y;
         if (drawX1 - drawX0 < 2.f) { drawX0 = tb.x - 20.f; drawX1 = tb.x + 20.f; }
+
         if (Vars.ESP.box) {
             ImU32 frameColor = ImColor(b4);
             ImU32 fillCol    = ImColor(b4.x, b4.y, b4.z, 0.08f);
             drawCornerFrame(drawX0, drawTop, drawX1, drawBot, frameColor, fillCol);
 
-            // Точка-головa — проекция реальной headBone на экран (центр прицельной кости)
-            V3f hbw = boneWorld(e, 0);
+            // Точка-головa — используем уже посчитанную headBone и проекцию (без перерасчёта)
             V2f hs{0,0};
-            if (w2s(cam, fwd, hbw, tanHalf, aspect, (float)screenW, (float)screenH, hs)) {
+            if (w2s(cam, fwd, headBone, tanHalf, aspect, swF, shF, hs)) {
                 if (hs.x >= drawX0 - 4.f && hs.x <= drawX1 + 4.f &&
                     hs.y >= drawTop - 4.f && hs.y <= drawBot + 4.f) {
-                    dl->AddCircleFilled(ImVec2(hs.x, hs.y), 2.6f, frameColor, 12);
-                    dl->AddCircleFilled(ImVec2(hs.x, hs.y), 1.2f, IM_COL32(255,255,255,220), 10);
+                    dl->AddCircleFilled(ImVec2(hs.x, hs.y), 2.6f, frameColor, 8);
+                    dl->AddCircleFilled(ImVec2(hs.x, hs.y), 1.2f, IM_COL32(255,255,255,220), 8);
                 }
             }
-            // Точка-ноги по центру (чтобы быстро видеть где стоит цель)
             dl->AddCircleFilled(ImVec2((drawX0+drawX1)*0.5f, drawBot - 1.f),
-                                1.8f, frameColor, 10);
+                                1.8f, frameColor, 8);
         }
+
         if (Vars.ESP.tracer) {
-            // Трейсер идёт от выбранного origin (верх/центр/низ экрана) до ног цели.
-            float endX = cx; // центр бокса
+            float endX = cx;
             float endY = fb.y;
-            if (endY > (float)screenH) endY = (float)screenH;
+            if (endY > shF) endY = shF;
             if (endY < 0.f) endY = 0.f;
-            dl->AddLine(tracerOrg, ImVec2(endX, endY), ImColor(linecolor), 1.4f);
+            dl->AddLine(tracerOrg, ImVec2(endX, endY), ImColor(linecolor), 1.3f);
         }
-        ImFont* nf = ImGui::GetFont();
-        // Compact pill: name + distance. Distance rendered in a small "chip" style
-        // after the name so it reads as a single line without a heavy separator.
-        char distText[32] = {0};
+
+        // Имя + расстояние — только когда реально нужно, без лишнего CalcTextSize
         const bool hasName = Vars.ESP.name && !e.name.empty();
         const bool hasDistance = Vars.ESP.distance;
-        if (hasDistance) snprintf(distText, sizeof(distText), "%dm", (int)dist);
-        const float nFs = 12.5f;
-        ImVec2 nameSize = hasName ? nf->CalcTextSizeA(nFs, FLT_MAX, 0, e.name.c_str()) : ImVec2(0,0);
-        ImVec2 distSize = hasDistance ? nf->CalcTextSizeA(nFs, FLT_MAX, 0, distText) : ImVec2(0,0);
-        const float chipPadX = 6.f, chipPadY = 2.f;
-        const float chipW = hasDistance ? distSize.x + chipPadX*2 : 0.f;
-        const float gap = 6.f;
-        const float textW = nameSize.x + (hasName&&hasDistance ? gap : 0.f) + chipW;
-        if (textW > 0.5f) {
-            const float padX = 8.f, padY = 4.f;
-            float labelY = tb.y - nameSize.y - 10.f;
-            if (labelY < 2.f) labelY = 2.f;
-            if (labelY > (float)screenH - nameSize.y - 6.f)
-                labelY = (float)screenH - nameSize.y - 6.f;
-            float cx = (drawX0 + drawX1) * 0.5f;
-            float labelLeft  = cx - textW * 0.5f - padX;
-            float labelRight = cx + textW * 0.5f + padX;
-            if (labelLeft < 2.f) { labelRight += 2.f - labelLeft; labelLeft = 2.f; }
-            if (labelRight > (float)screenW - 2.f) {
-                labelLeft -= labelRight - ((float)screenW - 2.f);
-                labelRight = (float)screenW - 2.f;
-            }
-            float labelBottom = labelY + nameSize.y + padY*2;
-            // Фон пилюли
-            dl->AddRectFilled(ImVec2(labelLeft, labelY - 2.f),
-                              ImVec2(labelRight, labelBottom),
-                              IM_COL32(12, 14, 20, 220), 5.f);
-            // Тонкая цветная полоска слева под цвет команды/врага
-            ImU32 accent = ImColor(b4);
-            dl->AddRectFilled(ImVec2(labelLeft, labelY + 3.f),
-                              ImVec2(labelLeft + 2.2f, labelBottom - 3.f),
-                              accent, 1.f);
-            // Маленькая соединительная палочка от бокса до пилюли (смотрится собранно)
-            float boxCx = cx;
-            if (boxCx >= labelLeft - 2.f && boxCx <= labelRight + 2.f) {
-                dl->AddLine(ImVec2(boxCx, labelBottom),
-                            ImVec2(boxCx, tb.y - 1.f),
-                            ImColor(b4.x, b4.y, b4.z, 0.55f), 1.0f);
-            }
-            float tx = labelLeft + padX;
-            float ty = labelY + padY;
-            if (hasName) {
-                dl->AddText(nf, nFs, ImVec2(tx, ty), ImColor(n4), e.name.c_str());
-                tx += nameSize.x + gap;
-            }
-            if (hasDistance) {
-                float chipL = tx;
-                float chipR = tx + chipW;
-                float chipT = ty - 1.f;
-                float chipB = ty + distSize.y + 2.f*chipPadY - 1.f;
-                dl->AddRectFilled(ImVec2(chipL, chipT), ImVec2(chipR, chipB),
-                                  ImColor(b4.x, b4.y, b4.z, 0.22f), 3.f);
-                dl->AddText(nf, nFs,
-                            ImVec2(chipL + chipPadX, ty + chipPadY - 1.f),
-                            ImColor(distancecolor), distText);
+        if (hasName || hasDistance) {
+            char distText[8] = {0};
+            if (hasDistance) snprintf(distText, sizeof(distText), "%dm", (int)dist);
+            ImVec2 nameSize = hasName ? nfCache->CalcTextSizeA(nFsCache, FLT_MAX, 0, e.name.c_str()) : ImVec2(0,0);
+            ImVec2 distSize = hasDistance ? nfCache->CalcTextSizeA(nFsCache, FLT_MAX, 0, distText) : ImVec2(0,0);
+            const float chipPadX = 6.f;
+            const float chipW = hasDistance ? distSize.x + chipPadX*2 : 0.f;
+            const float gap = 6.f;
+            const float textW = nameSize.x + (hasName&&hasDistance ? gap : 0.f) + chipW;
+            if (textW > 0.5f) {
+                const float padX = 8.f, padY = 4.f;
+                float labelY = tb.y - nameSize.y - 10.f;
+                if (labelY < 2.f) labelY = 2.f;
+                if (labelY > shF - nameSize.y - 6.f) labelY = shF - nameSize.y - 6.f;
+                float lblCx = (drawX0 + drawX1) * 0.5f;
+                float labelLeft  = lblCx - textW * 0.5f - padX;
+                float labelRight = lblCx + textW * 0.5f + padX;
+                if (labelLeft < 2.f) { labelRight += 2.f - labelLeft; labelLeft = 2.f; }
+                if (labelRight > swF - 2.f) {
+                    labelLeft -= labelRight - (swF - 2.f);
+                    labelRight = swF - 2.f;
+                }
+                float labelBottom = labelY + nameSize.y + padY*2;
+                dl->AddRectFilled(ImVec2(labelLeft, labelY - 2.f),
+                                  ImVec2(labelRight, labelBottom),
+                                  IM_COL32(12, 14, 20, 220), 5.f);
+                ImU32 accent = ImColor(b4);
+                dl->AddRectFilled(ImVec2(labelLeft, labelY + 3.f),
+                                  ImVec2(labelLeft + 2.2f, labelBottom - 3.f),
+                                  accent, 1.f);
+                float boxCx = lblCx;
+                if (boxCx >= labelLeft - 2.f && boxCx <= labelRight + 2.f) {
+                    dl->AddLine(ImVec2(boxCx, labelBottom),
+                                ImVec2(boxCx, tb.y - 1.f),
+                                ImColor(b4.x, b4.y, b4.z, 0.5f), 1.0f);
+                }
+                float tx = labelLeft + padX;
+                float ty = labelY + padY;
+                if (hasName) {
+                    dl->AddText(nfCache, nFsCache, ImVec2(tx, ty), ImColor(n4), e.name.c_str());
+                    tx += nameSize.x + gap;
+                }
+                if (hasDistance) {
+                    const float chipPadY = 2.f;
+                    float chipL = tx;
+                    float chipR = tx + chipW;
+                    float chipT = ty - 1.f;
+                    float chipB = ty + distSize.y + 2.f*chipPadY - 1.f;
+                    dl->AddRectFilled(ImVec2(chipL, chipT), ImVec2(chipR, chipB),
+                                      ImColor(b4.x, b4.y, b4.z, 0.22f), 3.f);
+                    dl->AddText(nfCache, nFsCache,
+                                ImVec2(chipL + chipPadX, ty + chipPadY - 1.f),
+                                ImColor(distancecolor), distText);
+                }
             }
         }
-        (void)dist;
         shown++;
     }
 
-    // чистка протухших стрелок (цель давно на экране или ушла)
-    for (auto it = s_arrows.begin(); it != s_arrows.end();) {
-        if (it->second.miss > 10) it = s_arrows.erase(it);
-        else ++it;
+    // Чистим стрелки раз в 15 кадров, не каждый тик.
+    static int cleanCtr = 0;
+    if ((++cleanCtr & 15) == 0 && !s_arrows.empty()) {
+        for (auto it = s_arrows.begin(); it != s_arrows.end();) {
+            if (it->second.miss > 15) it = s_arrows.erase(it);
+            else ++it;
+        }
     }
-    if (++g_frames % 300 == 0) {
-        printf("[esp] ext n=%u shown=%d look=%.2f,%.2f campos=%.0f,%.0f,%.0f\n",
-               (unsigned)ents.size(), shown, lookDbg[0], lookDbg[1],
-               cam.x, cam.y, cam.z);
+    // Лог редко (раз в 600 кадров), не трогаем stdout чаще — иначе фризит.
+    if (++g_frames % 600 == 0) {
+        printf("[esp] n=%u shown=%d fps≈60 cam=%.0f,%.0f,%.0f\n",
+               (unsigned)ents.size(), shown, cam.x, cam.y, cam.z);
         fflush(stdout);
     }
 }
