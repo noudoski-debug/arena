@@ -4,7 +4,7 @@
 #include "dobby.h"
 #include "Input.h"
 #include "Menu.h"
-#include "Runtime.h"
+#include "Diagnostics.h"
 #include "Target.h"
 #include <EGL/egl.h>
 #include <android/log.h>
@@ -27,6 +27,8 @@ struct Renderer {
     EGLSurface surface = EGL_NO_SURFACE;
     std::chrono::steady_clock::time_point last;
     bool failed = false;
+    bool contextWarning = false;
+    bool versionWarning = false;
 };
 Renderer& renderer() { static Renderer r; return r; }
 EGLBoolean swap(EGLDisplay display, EGLSurface surface) {
@@ -34,12 +36,18 @@ EGLBoolean swap(EGLDisplay display, EGLSurface surface) {
     std::unique_lock<std::mutex> lock(r.mutex, std::try_to_lock);
     EGLint width = 0, height = 0, version = 0;
     const EGLContext current = eglGetCurrentContext();
-    if (!lock.owns_lock() || r.failed || current == EGL_NO_CONTEXT ||
-        !eglQueryContext(display, current, EGL_CONTEXT_CLIENT_VERSION, &version) || version < 3 ||
-        !eglQuerySurface(display, surface, EGL_WIDTH, &width) ||
-        !eglQuerySurface(display, surface, EGL_HEIGHT, &height) || width < 100 || height < 100 ||
-        (r.gui && r.context != current))
-        return originalSwap(display, surface);
+    if (!lock.owns_lock() || r.failed) return originalSwap(display,surface);
+    if (current==EGL_NO_CONTEXT || !eglQueryContext(display,current,EGL_CONTEXT_CLIENT_VERSION,&version) || version<3) {
+        if (!r.versionWarning) { r.versionWarning=true;diagnostics::log("RENDER waiting for an OpenGL ES 3 context; observed version=%d",version); }
+        return originalSwap(display,surface);
+    }
+    if (!eglQuerySurface(display,surface,EGL_WIDTH,&width) ||
+        !eglQuerySurface(display,surface,EGL_HEIGHT,&height) || width<100 || height<100)
+        return originalSwap(display,surface);
+    if (r.gui && r.context!=current) {
+        if (!r.contextWarning) { r.contextWarning=true;diagnostics::log("RENDER context changed; overlay skipped. Restart and load after the game screen is ready."); }
+        return originalSwap(display,surface);
+    }
     // All ImGui access happens on the EGL thread. Input hooks only enqueue copies.
     ImGuiContext* previous = ImGui::GetCurrentContext();
     if (!r.gui) {
@@ -55,13 +63,14 @@ EGLBoolean swap(EGLDisplay display, EGLSurface surface) {
                                      &font, io.Fonts->GetGlyphRangesCyrillic());
         ImGui::StyleColorsDark();
         if (!ImGui_ImplOpenGL3_Init("#version 300 es")) {
+            diagnostics::log("RENDER OpenGL backend initialization failed");
             r.failed = true;
             ImGui::DestroyContext(r.gui); r.gui = nullptr;
             ImGui::SetCurrentContext(previous);
             return originalSwap(display, surface);
         }
         r.last = std::chrono::steady_clock::now();
-        __android_log_print(ANDROID_LOG_INFO, "DearVision", "Internal renderer initialized: %dx%d", width, height);
+        diagnostics::log("RENDER initialized: %dx%d / MENU ONLY",width,height);
     }
     ImGui::SetCurrentContext(r.gui);
     ImGuiIO& io = ImGui::GetIO();
@@ -85,15 +94,17 @@ EGLBoolean swap(EGLDisplay display, EGLSurface surface) {
 }
 void* start(void*) {
     // Keep the handle open for the lifetime of installed function hooks.
+    diagnostics::log("BOOT installing EGL hook (menu-only startup)");
     void* egl = dlopen("libEGL.so", RTLD_NOW | RTLD_LOCAL);
     void* address = egl ? dlsym(egl, "eglSwapBuffers") : nullptr;
     if (!address || DobbyHook(address, reinterpret_cast<void*>(swap), reinterpret_cast<void**>(&originalSwap)) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "DearVision", "eglSwapBuffers hook failed; no renderer installed");
+        diagnostics::log("BOOT eglSwapBuffers hook failed; no renderer installed");
         return nullptr;
     }
-    inputReady.store(input::install());
-    runtime::installGameHooks();
-    __android_log_print(ANDROID_LOG_INFO, "DearVision", "OpenGL ES required. Vulkan is NOT patched or disabled.");
+    diagnostics::log("BOOT EGL hook installed; installing menu input");
+    const bool installedInput=input::install();inputReady.store(installedInput);
+    diagnostics::log("BOOT input=%s; game hooks NOT requested",installedInput?"ready":"unavailable");
+    diagnostics::log("BOOT waiting for first rendered menu frame. OpenGL ES 3 required; Vulkan unsupported.");
     return nullptr;
 }
 __attribute__((constructor)) void loaded() {
@@ -103,9 +114,11 @@ __attribute__((constructor)) void loaded() {
     if (!f) return;
     std::fread(name, 1, sizeof(name)-1, f); std::fclose(f);
     if (std::strcmp(name, target::Package) != 0) return;
+    diagnostics::reset();
+    diagnostics::log("BOOT library constructor / menu-first build / target=%s",target::Version);
     pthread_t thread;
     const int error = pthread_create(&thread, nullptr, start, nullptr);
     if (error == 0) pthread_detach(thread);
-    else __android_log_print(ANDROID_LOG_ERROR, "DearVision", "pthread_create failed: %d", error);
+    else diagnostics::log("BOOT pthread_create failed: %d",error);
 }
 }

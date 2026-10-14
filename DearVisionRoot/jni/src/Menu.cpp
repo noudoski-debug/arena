@@ -144,11 +144,28 @@ void render() {
     }
     ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.9f);
+    ImGui::SetNextWindowSize(ImVec2(std::min(width-24.f,480.f),0),ImGuiCond_Always);
     ImGui::Begin("DearVision status", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
     if (ImGui::Button("DearVision / INTERNAL ROOT", ImVec2(320, 42))) LitvinMenu::open = !LitvinMenu::open;
     ImGui::Text("Build: %s", target::Version);
-    ImGui::TextUnformatted(runtime::status());
+    ImGui::TextWrapped("%s",runtime::status());
+    if (runtime::hookStage()==runtime::HookStage::MenuOnly) {
+        ImGui::TextUnformatted("Internal menu only. This is NOT an external overlay.");
+        if (ImGui::Button("Connect game (install hooks)")) ImGui::OpenPopup("Connect game?");
+    }
+    ImGui::SetNextWindowSize(ImVec2(std::min(width-24.f,560.f),0),ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Connect game?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Installs game hooks in this process. May trigger a security warning or exit.");
+        ImGui::TextWrapped("All gameplay toggles will be reset. No live unhook or automatic retry.");
+        if (ImGui::Button("Connect")) {
+            pause(); // Never carry pre-connection/profile toggles into the first game callback.
+            runtime::requestGameHooks();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     if(LitvinMenu::open && ImGui::Button("Profiles / effect preview"))ImGui::OpenPopup("Profiles and effect preview");
     profiles(width,height);
     ImGui::End();

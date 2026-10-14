@@ -4,6 +4,10 @@
 #include "Input.h"
 #include <cassert>
 namespace runtime {
+HookStage stage=HookStage::MenuOnly;
+HookStage hookStage() { return stage; }
+int connectRequests=0;
+bool requestGameHooks() { ++connectRequests;return true; }
 Frame snapshot() { return {{{1,0.5f,0.2f,0.5f,0.8f,12,true,true,1,"test"}},1}; }
 void setEnabled(bool) {}
 void submit(const AllVars&,modules::Controls) {}
@@ -26,6 +30,8 @@ int main() {
     assert(LitvinMenu::Supported(LitvinMenu::T("ESP",&Vars.ESP.enable)));
     LitvinMenu::open=true; Vars.ESP.enable=true;
     Vars.ESP.tracer=true; Vars.ESP.outline=true;
+    for (auto stage:{runtime::HookStage::MenuOnly,runtime::HookStage::Connecting,runtime::HookStage::Ready,runtime::HookStage::Failed}) {
+    runtime::stage=stage;
     for (int orientation=0;orientation<2;++orientation) {
         io.DisplaySize=orientation?ImVec2(720,1280):ImVec2(1920,1080);
         for (int section=0;section<5;++section) {
@@ -37,5 +43,7 @@ int main() {
             }
         }
     }
+    }
+    assert(runtime::connectRequests==0); // Rendering/toggles never connect automatically.
     ImGui::DestroyContext();
 }

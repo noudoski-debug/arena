@@ -198,6 +198,7 @@ int main(int argc,char** argv) {
     const bool released=session.call(munmapFn,{buffer,size},ignored) && ignored==0;
     const bool restored=session.close();
     if (!released || !restored) return 8;
-    std::printf("libDear.so loaded. Verify asynchronous hooks with: logcat -s DearVision\n");
+    std::printf("dlopen succeeded. Menu-only startup; game hooks require Connect game in the overlay.\n");
+    std::printf("This does not confirm renderer initialization or compatibility. Check: logcat -s DearVision\n");
     return 0;
 }

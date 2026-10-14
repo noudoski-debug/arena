@@ -1,5 +1,6 @@
 #include "Runtime.h"
 #include "GameOffsets.h"
+#include "Diagnostics.h"
 #include "dobby.h"
 #include <android/log.h>
 #include <link.h>
@@ -12,6 +13,8 @@
 #include <mutex>
 #include <unordered_map>
 #include <unistd.h>
+#include <pthread.h>
+#include <type_traits>
 
 namespace runtime {
 namespace {
@@ -80,7 +83,8 @@ struct State {
     bool publishedFreecam=false;
     Vec3 publishedCamera;
     std::atomic<bool> enabled{false}, ready{false};
-    std::atomic<const char*> message{"Waiting for libil2cpp.so"};
+    std::atomic<HookStage> hookStage{HookStage::MenuOnly};
+    std::atomic<const char*> message{"MENU ONLY / game hooks not installed"};
     std::mutex mutex;
     std::unordered_map<uintptr_t, TimedBox> players;
 };
@@ -405,8 +409,11 @@ Frame snapshot() {
 }
 void submit(const AllVars& options, modules::Controls controls) {
     auto& s=state();
-    { std::lock_guard<std::mutex> lock(s.optionsMutex); s.options=options;s.controls=controls; }
-    setEnabled(options.ESP.enable || options.Chams.enable || options.Aimbot.enableAimbot || options.Aimbot.silentAim);
+    const bool connected=s.hookStage.load()==HookStage::Ready;
+    { std::lock_guard<std::mutex> lock(s.optionsMutex);
+      s.options=connected?options:AllVars{};
+      s.controls=connected?controls:modules::Controls{}; }
+    setEnabled(connected && (options.ESP.enable || options.Chams.enable || options.Aimbot.enableAimbot || options.Aimbot.silentAim));
 }
 void setEnabled(bool enabled) {
     auto& s = state();
@@ -414,63 +421,107 @@ void setEnabled(bool enabled) {
     if (!enabled) { std::lock_guard<std::mutex> lock(s.mutex); s.players.clear(); }
 }
 const char* status() { return state().message.load(); }
-void installGameHooks() {
-    auto& s = state();
-    uintptr_t update = 0;
-    for (int i = 0; i < 120 && !update; ++i) {
-        update = resolve(offsets::PlayerUpdate);
-        if (!update) sleep(1);
+HookStage hookStage() { return state().hookStage.load(); }
+namespace {
+using Resolver=uintptr_t (*)(uintptr_t);
+using HookInstaller=int (*)(void*,void*,void**);
+// All symbols are resolved before patching anything. Failure after a patch is
+// terminal for this process: keep callbacks pass-through, never retry/unhook live.
+bool installGameHooks(Resolver resolver=resolve,HookInstaller installer=DobbyHook) {
+    auto& s=state();
+    diagnostics::log("GAME preflight begin (explicit user request)");
+    bool valid=true;
+    auto bind=[&](auto& destination,uintptr_t rva,const char* name) {
+        const uintptr_t address=resolver(rva);
+        destination=reinterpret_cast<std::decay_t<decltype(destination)>>(address);
+        if (!address) { valid=false;diagnostics::log("GAME missing executable RVA: %s",name); }
+    };
+    bind(s.api.linecast,offsets::PhysicsLinecast,"Physics.Linecast");
+    bind(s.api.hitTransform,offsets::HitTransform,"RaycastHit.transform");
+    bind(s.api.isChildOf,offsets::IsChildOf,"Transform.IsChildOf");
+    bind(s.api.project,offsets::WorldToScreenPoint,"Camera.WorldToScreenPoint");
+    bind(s.api.position,offsets::GetPosition,"Transform.position");
+    bind(s.api.transform,offsets::GetTransform,"Component.transform");
+    bind(s.api.camera,offsets::GetMainCamera,"Camera.main");
+    bind(s.api.local,offsets::IsLocalPlayer,"NetworkBehaviour.isLocalPlayer");
+    bind(s.api.width,offsets::GetScreenWidth,"Screen.width");
+    bind(s.api.height,offsets::GetScreenHeight,"Screen.height");
+    bind(s.api.setPosition,offsets::SetPosition,"Transform.set_position");
+    bind(s.api.rotation,offsets::GetRotation,"Transform.rotation");
+    bind(s.api.setRotation,offsets::SetRotation,"Transform.set_rotation");
+    bind(s.api.forward,offsets::GetForward,"Transform.forward");
+    bind(s.api.right,offsets::GetRight,"Transform.right");
+    bind(s.api.fov,offsets::GetFov,"Camera.fieldOfView");
+    bind(s.api.setFov,offsets::SetFov,"Camera.set_fieldOfView");
+    bind(s.api.aspect,offsets::GetAspect,"Camera.aspect");
+    bind(s.api.setAspect,offsets::SetAspect,"Camera.set_aspect");
+    struct Hook {
+        const char* name;uintptr_t rva;Lifecycle callback;Lifecycle* original;uintptr_t address=0;
+    } hooks[]={
+        {"Player.OnDisable",offsets::PlayerOnDisable,onDisable,&s.api.disable},
+        {"Player.Update",offsets::PlayerUpdate,onUpdate,&s.api.update},
+        {"Player.LateUpdate",offsets::PlayerLateUpdate,onLate,&s.api.late},
+        {"FPHitscan.Update",offsets::WeaponUpdate,onWeaponUpdate,&s.api.weaponUpdate},
+        {"FPManager.LateUpdate",offsets::FpLateUpdate,onFpLate,&s.api.fpLate},
+    };
+    for (auto& hook:hooks) {
+        hook.address=resolver(hook.rva);
+        if (!hook.address) { valid=false;diagnostics::log("GAME missing hook RVA: %s",hook.name); }
     }
-    const uintptr_t disable = resolve(offsets::PlayerOnDisable);
-    s.api.linecast=reinterpret_cast<decltype(s.api.linecast)>(resolve(offsets::PhysicsLinecast));
-    s.api.hitTransform=reinterpret_cast<decltype(s.api.hitTransform)>(resolve(offsets::HitTransform));
-    s.api.isChildOf=reinterpret_cast<decltype(s.api.isChildOf)>(resolve(offsets::IsChildOf));
-    s.api.project = reinterpret_cast<decltype(s.api.project)>(resolve(offsets::WorldToScreenPoint));
-    s.api.position = reinterpret_cast<decltype(s.api.position)>(resolve(offsets::GetPosition));
-    s.api.transform = reinterpret_cast<decltype(s.api.transform)>(resolve(offsets::GetTransform));
-    s.api.camera = reinterpret_cast<decltype(s.api.camera)>(resolve(offsets::GetMainCamera));
-    s.api.local = reinterpret_cast<decltype(s.api.local)>(resolve(offsets::IsLocalPlayer));
-    s.api.width = reinterpret_cast<decltype(s.api.width)>(resolve(offsets::GetScreenWidth));
-    s.api.height = reinterpret_cast<decltype(s.api.height)>(resolve(offsets::GetScreenHeight));
-    s.api.setPosition=reinterpret_cast<decltype(s.api.setPosition)>(resolve(offsets::SetPosition));
-    s.api.rotation=reinterpret_cast<decltype(s.api.rotation)>(resolve(offsets::GetRotation));
-    s.api.setRotation=reinterpret_cast<decltype(s.api.setRotation)>(resolve(offsets::SetRotation));
-    s.api.forward=reinterpret_cast<decltype(s.api.forward)>(resolve(offsets::GetForward));
-    s.api.right=reinterpret_cast<decltype(s.api.right)>(resolve(offsets::GetRight));
-    s.api.fov=reinterpret_cast<decltype(s.api.fov)>(resolve(offsets::GetFov));
-    s.api.setFov=reinterpret_cast<decltype(s.api.setFov)>(resolve(offsets::SetFov));
-    s.api.aspect=reinterpret_cast<decltype(s.api.aspect)>(resolve(offsets::GetAspect));
-    s.api.setAspect=reinterpret_cast<decltype(s.api.setAspect)>(resolve(offsets::SetAspect));
-    if (!update || !disable || !s.api.project || !s.api.position || !s.api.transform ||
-        !s.api.camera || !s.api.local || !s.api.width || !s.api.height) {
-        s.message.store("ERROR: IL2CPP RVAs unavailable; check exact game build");
-    } else if (DobbyHook(reinterpret_cast<void*>(disable), reinterpret_cast<void*>(onDisable),
-                         reinterpret_cast<void**>(&s.api.disable)) != 0) {
-        s.message.store("ERROR: OnDisable hook failed");
-    } else if (DobbyHook(reinterpret_cast<void*>(update), reinterpret_cast<void*>(onUpdate),
-                         reinterpret_cast<void**>(&s.api.update)) != 0) {
-        s.message.store("ERROR: Update hook failed");
-    } else {
-        s.ready.store(true, std::memory_order_release);
-        s.message.store("Internal hooks ready / enable ESP in Visuals");
+    if (!valid) {
+        s.message.store("ERROR: game API unavailable; no game hooks installed. Restart before retry.");
+        return false;
     }
-    if (s.ready.load() && s.api.setPosition && s.api.rotation && s.api.setRotation &&
-        s.api.forward && s.api.right && s.api.fov && s.api.setFov && s.api.aspect && s.api.setAspect) {
-        bool ok=true;
-        auto hook=[&](uintptr_t rva, Lifecycle callback, Lifecycle& original) {
-            const uintptr_t target=resolve(rva);
-            if (!target || DobbyHook(reinterpret_cast<void*>(target),reinterpret_cast<void*>(callback),
-                                     reinterpret_cast<void**>(&original))!=0) ok=false;
-        };
-        hook(offsets::PlayerLateUpdate,onLate,s.api.late);
-        hook(offsets::WeaponUpdate,onWeaponUpdate,s.api.weaponUpdate);
-        hook(offsets::FpLateUpdate,onFpLate,s.api.fpLate);
-        s.moduleReady.store(ok);
-        s.message.store(!ok?"ESP ready / ERROR: gameplay module hooks failed":
-            (!s.api.linecast || !s.api.hitTransform || !s.api.isChildOf)?
-            "ESP + Aim ready / Visible Check unavailable (blocks targets when enabled)":
-            "Internal ESP + Aim + Visible Check hooks ready");
-    } else if (s.ready.load()) s.message.store("ESP ready / ERROR: module API unavailable");
-    __android_log_print(ANDROID_LOG_INFO, "DearVision", "%s", status());
+    diagnostics::log("GAME preflight passed (RVA ranges only, not a build fingerprint)");
+    for (auto& hook:hooks) {
+        diagnostics::log("GAME installing %s",hook.name);
+        const int result=installer(reinterpret_cast<void*>(hook.address),reinterpret_cast<void*>(hook.callback),
+                                   reinterpret_cast<void**>(hook.original));
+        diagnostics::log("GAME install %s result=%d",hook.name,result);
+        if (result!=0) {
+            s.message.store("ERROR: partial game hook installation; modules inactive. Restart game.");
+            return false;
+        }
+    }
+    // Publish only after the complete hook set succeeds. No partially enabled ESP/Aim.
+    s.moduleReady.store(true);
+    s.ready.store(true,std::memory_order_release);
+    s.message.store("GAME CONNECTED / ESP and Aim available (device behavior unverified)");
+    return true;
 }
+void* gameHookWorker(void*) {
+    bool ok=false;
+    try { ok=installGameHooks(); }
+    catch (...) { state().message.store("ERROR: game hook worker failed. Restart game."); }
+    diagnostics::log("%s",status());
+    state().hookStage.store(ok?HookStage::Ready:HookStage::Failed);
+    return nullptr;
+}
+using ThreadLauncher=int (*)(pthread_t*,const pthread_attr_t*,void* (*)(void*),void*);
+bool requestGameHooksWith(ThreadLauncher launch) {
+    auto& s=state();
+    HookStage expected=HookStage::MenuOnly;
+    if (!s.hookStage.compare_exchange_strong(expected,HookStage::Connecting)) return false;
+    s.message.store("CONNECTING / resolving game API and installing hooks");
+    { std::lock_guard<std::mutex> lock(s.optionsMutex);s.options=AllVars{};s.controls={}; }
+    setEnabled(false);
+    diagnostics::log("GAME Connect requested; starting one-shot worker");
+    pthread_attr_t attr;
+    int error=pthread_attr_init(&attr);
+    if (error==0) {
+        error=pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
+        pthread_t thread;
+        if (error==0) error=launch(&thread,&attr,gameHookWorker,nullptr);
+        pthread_attr_destroy(&attr);
+    }
+    if (error!=0) {
+        s.message.store("ERROR: cannot start game hook worker. Restart game.");
+        diagnostics::log("GAME worker creation failed: %d",error);
+        s.hookStage.store(HookStage::Failed);
+        return false;
+    }
+    return true;
+}
+}
+bool requestGameHooks() { return requestGameHooksWith(pthread_create); }
 }

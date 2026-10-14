@@ -72,6 +72,7 @@ void disable(void*,const void*) { ++disables; }
 }
 int main() {
     auto& s=runtime::state();
+    s.hookStage.store(runtime::HookStage::Ready); // Explicitly connected mock game.
     s.api.update=update; s.api.disable=disable;
     s.api.local=[](void*,const void*) { return local; };
     s.api.camera=[](const void*) -> void* { return &cameraObject; };

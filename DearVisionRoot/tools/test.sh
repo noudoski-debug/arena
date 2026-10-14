@@ -22,6 +22,8 @@ printf '#error Android profile code must not depend on filesystem\n' > "$OUT/no-
 "$OUT/maps"
 "$CXX" -std=c++17 -pthread "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_runtime.cpp" -ldl -o "$OUT/runtime"
 "$OUT/runtime"
+"$CXX" -std=c++17 -pthread "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_startup.cpp" -ldl -o "$OUT/startup"
+"$OUT/startup"
 "$CXX" -std=c++17 -pthread "${INC[@]}" "$ROOT/tests/test_menu.cpp" "$ROOT/jni/src/Menu.cpp" "$ROOT/jni/src/Chams.cpp" "$ROOT/jni/src/Config.cpp" "$ROOT/jni/src/Effects.cpp" \
     "$ROOT/jni/src/ImGui/imgui.cpp" "$ROOT/jni/src/ImGui/imgui_draw.cpp" \
     "$ROOT/jni/src/ImGui/imgui_tables.cpp" "$ROOT/jni/src/ImGui/imgui_widgets.cpp" -o "$OUT/menu"

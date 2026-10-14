@@ -18,6 +18,9 @@ struct Frame { std::vector<Box> boxes; unsigned players = 0; bool freecam = fals
 void submit(const AllVars& options, modules::Controls controls);
 Frame snapshot();
 void setEnabled(bool enabled);
-void installGameHooks();
+enum class HookStage { MenuOnly, Connecting, Ready, Failed };
+HookStage hookStage();
+// Explicit one-shot request. Never invoked by submit(), profiles or module toggles.
+bool requestGameHooks();
 const char* status();
 }
