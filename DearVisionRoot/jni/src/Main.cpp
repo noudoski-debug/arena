@@ -32,12 +32,13 @@ Renderer& renderer() { static Renderer r; return r; }
 EGLBoolean swap(EGLDisplay display, EGLSurface surface) {
     auto& r = renderer();
     std::unique_lock<std::mutex> lock(r.mutex, std::try_to_lock);
-    EGLint width = 0, height = 0;
+    EGLint width = 0, height = 0, version = 0;
     const EGLContext current = eglGetCurrentContext();
     if (!lock.owns_lock() || r.failed || current == EGL_NO_CONTEXT ||
+        !eglQueryContext(display, current, EGL_CONTEXT_CLIENT_VERSION, &version) || version < 3 ||
         !eglQuerySurface(display, surface, EGL_WIDTH, &width) ||
         !eglQuerySurface(display, surface, EGL_HEIGHT, &height) || width < 100 || height < 100 ||
-        (r.gui && (r.context != current || r.surface != surface)))
+        (r.gui && r.context != current))
         return originalSwap(display, surface);
     // All ImGui access happens on the EGL thread. Input hooks only enqueue copies.
     ImGuiContext* previous = ImGui::GetCurrentContext();

@@ -28,12 +28,22 @@ jobs:
           test -x "$ndk/ndk-build"
           echo "NDK_PATH=$ndk" >> "$GITHUB_ENV"
       - run: DearVisionRoot/build.sh
+      - name: Package and inspect ARM64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=DearVisionRoot/build/libs/arm64-v8a
+          readelf -h "$out/libDear.so" | grep 'Machine:.*AArch64'
+          readelf -h "$out/dear-loader" | grep 'Machine:.*AArch64'
+          package=DearVisionRoot/build/package
+          mkdir -p "$package"
+          cp "$out/libDear.so" "$out/dear-loader" DearVisionRoot/run-root.sh "$package/"
+          cp DearVisionRoot/README_RU.md DearVisionRoot/THIRD_PARTY.md "$package/"
+          cp -r DearVisionRoot/licenses "$package/"
+          printf 'Commit: %s\nNDK: %s\nDevice tested: NO\n' "$GITHUB_SHA" "$NDK_PATH" > "$package/BUILD.txt"
+          (cd "$package" && sha256sum libDear.so dear-loader > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: DearVisionRoot-arm64-untested-on-device
           if-no-files-found: error
-          path: |
-            DearVisionRoot/build/libs/arm64-v8a/libDear.so
-            DearVisionRoot/build/libs/arm64-v8a/dear-loader
-            DearVisionRoot/run-root.sh
-            DearVisionRoot/README_RU.md
+          path: DearVisionRoot/build/package/
