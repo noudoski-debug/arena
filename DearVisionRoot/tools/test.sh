@@ -10,8 +10,15 @@ sh -n "$ROOT/run-root.sh"
 CXX=${CXX:-g++}
 INC=(-I"$ROOT/jni/include" -I"$ROOT/jni/include/ImGui" -I"$ROOT/jni/include/Hook/Dobby")
 "$CXX" -std=c++17 "$ROOT/tests/test_maps.cpp" -o "$OUT/maps"
-"$CXX" -std=c++17 -DDEAR_HOST_TEST "${INC[@]}" "$ROOT/tests/test_modules.cpp" "$ROOT/jni/src/Config.cpp" "$ROOT/jni/src/Effects.cpp" -o "$OUT/modules"
+# Compile the Android profile implementation with a deliberately unavailable
+# filesystem header, matching the older AIDE NDK reported by users.
+mkdir -p "$OUT/no-filesystem"
+printf '#error Android profile code must not depend on filesystem\n' > "$OUT/no-filesystem/filesystem"
+"$CXX" -std=c++17 -DDEAR_HOST_TEST "${INC[@]}" -I"$OUT/no-filesystem" -c "$ROOT/jni/src/Config.cpp" -o "$OUT/config.o"
+"$CXX" -std=c++17 -DDEAR_HOST_TEST "${INC[@]}" "$ROOT/tests/test_modules.cpp" "$OUT/config.o" "$ROOT/jni/src/Effects.cpp" -o "$OUT/modules"
 "$OUT/modules"
+"$CXX" -std=c++17 -DDEAR_HOST_TEST "${INC[@]}" "$ROOT/tests/test_config_fs.cpp" "$OUT/config.o" -o "$OUT/config-fs"
+"$OUT/config-fs"
 "$OUT/maps"
 "$CXX" -std=c++17 -pthread "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_runtime.cpp" -ldl -o "$OUT/runtime"
 "$OUT/runtime"

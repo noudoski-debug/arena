@@ -1,5 +1,7 @@
 #include "Config.h"
-#include <filesystem>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <cmath>
@@ -56,9 +58,33 @@ template<class F> void schema(AllVars& v,F f) {
 #undef B
 #undef N
 }
-bool path(const std::string& name,std::filesystem::path& out) {
+std::string join(const std::string& base,const std::string& name) {
+    return base+(base.empty() || base.back()=='/'?"":"/")+name;
+}
+// Use Android/POSIX APIs: older AIDE libc++ distributions lack <filesystem>.
+bool ensureDirectory(const std::string& path) {
+    if (::mkdir(path.c_str(),0700)==0) return true;
+    if (errno==EEXIST) {
+        struct stat info{};
+        if (::stat(path.c_str(),&info)==0) {
+            if (S_ISDIR(info.st_mode)) return true;
+            errno=ENOTDIR;
+        }
+    }
+    message()="Cannot create profile directory: "+std::string(std::strerror(errno));
+    return false;
+}
+bool createDirectories(const std::string& path) {
+    if (path.empty()) { message()="Profile directory is empty";return false; }
+    for (size_t i=1;i<=path.size();++i) {
+        if ((i==path.size() || path[i]=='/') && !ensureDirectory(path.substr(0,i))) return false;
+    }
+    return true;
+}
+bool path(const std::string& name,std::string& out) {
     if (!validName(name)) { message()="Invalid profile name";return false; }
-    out=std::filesystem::path(directory())/(name+".cfg");return true;
+    if (directory().empty()) { message()="Profile directory is empty";return false; }
+    out=join(directory(),name+".cfg");return true;
 }
 }
 #ifdef DEAR_HOST_TEST
@@ -66,10 +92,9 @@ void setDirectory(const std::string& value) { directory()=value; }
 #endif
 const std::string& status() { return message(); }
 bool save(const std::string& name,const AllVars& vars) {
-    std::filesystem::path file;if(!path(name,file))return false;
-    std::error_code ec;std::filesystem::create_directories(directory(),ec);
-    if(ec){message()=ec.message();return false;}
-    std::string tmp=file.string()+".tmp";
+    std::string file;if(!path(name,file))return false;
+    if(!createDirectories(directory()))return false;
+    std::string tmp=file+".tmp";
     std::ofstream stream(tmp,std::ios::trunc);
     if(!stream){message()="Cannot write profile";return false;}
     stream<<"# DearVision internal profile v1\n"<<std::setprecision(9);
@@ -80,7 +105,7 @@ bool save(const std::string& name,const AllVars& vars) {
     message()="Saved "+name;return true;
 }
 bool load(const std::string& name,AllVars& vars) {
-    std::filesystem::path file;if(!path(name,file))return false;
+    std::string file;if(!path(name,file))return false;
     std::ifstream stream(file);if(!stream){message()="Cannot read profile";return false;}
     std::map<std::string,std::string> values;
     std::string line;
@@ -105,18 +130,24 @@ bool load(const std::string& name,AllVars& vars) {
     vars=candidate;message()="Loaded "+name;return true;
 }
 bool remove(const std::string& name) {
-    std::filesystem::path file;if(!path(name,file))return false;
+    std::string file;if(!path(name,file))return false;
     if(std::remove(file.c_str())!=0){message()="Cannot delete profile";return false;}
     message()="Deleted "+name;return true;
 }
 std::vector<std::string> list() {
-    std::vector<std::string> result;std::error_code ec;
-    std::filesystem::directory_iterator it(directory(),ec),end;
-    while(!ec && it!=end){
-        auto p=it->path();
-        if(p.extension()==".cfg" && validName(p.stem().string()))result.push_back(p.stem().string());
-        it.increment(ec);
+    std::vector<std::string> result;
+    DIR* dir=::opendir(directory().c_str());
+    if (!dir) return result;
+    while (const auto* entry=::readdir(dir)) {
+        const std::string name=entry->d_name;
+        if (name.size()<=4 || name.compare(name.size()-4,4,".cfg")!=0) continue;
+        const std::string stem=name.substr(0,name.size()-4);
+        if (!validName(stem)) continue;
+        struct stat info{};
+        const std::string file=join(directory(),name);
+        if (::stat(file.c_str(),&info)==0 && S_ISREG(info.st_mode)) result.push_back(stem);
     }
+    ::closedir(dir);
     std::sort(result.begin(),result.end());return result;
 }
 }

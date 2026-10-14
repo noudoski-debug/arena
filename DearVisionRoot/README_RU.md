@@ -72,6 +72,27 @@ NDK_PATH=/path/to/android-ndk DearVisionRoot/build.sh
 Результат: `DearVisionRoot/build/libs/arm64-v8a/libDear.so` и `dear-loader`.
 Исходные старые `libDear.so` из архивов не используются.
 
+### Сборка в Termux с Android-совместимым NDK
+
+Обычный Linux x86-64 NDK не запускается напрямую на ARM64-телефоне. Если уже
+установлен Android-совместимый NDK в `$HOME/ndk/android-ndk-aide`, из корня
+клонированного репозитория выполни:
+
+```sh
+NDK_PATH="$HOME/ndk/android-ndk-aide" JOBS=2 bash DearVisionRoot/build.sh
+```
+
+Нужны `python`, `make`, `bash`; исходники и NDK держи в `$HOME` Termux, не
+`/sdcard`. Root для компиляции не нужен. При нехватке памяти используй `JOBS=1`.
+
+Ошибка `Config.cpp: 'filesystem' file not found` устранена: Android-код профилей
+использует POSIX `mkdir/stat/opendir/readdir` вместо `std::filesystem`. Обнови
+исходники и повтори сборку; удалять NDK или отключать профили не требуется.
+Это исправление конкретной зависимости, **не гарантия полной совместимости
+старого AIDE NDK**: по-прежнему нужны C++17 и подходящий линкер. Сборка именно
+этим NDK на телефоне здесь не проверена. Host-тесты используют современный C++17
+компилятор; их fixtures могут использовать `std::filesystem`.
+
 ## Проверки на компьютере
 
 ```sh
