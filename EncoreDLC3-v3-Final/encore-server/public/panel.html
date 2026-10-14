@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EncoreDLC — Мой ключ</title>
+<link rel="stylesheet" href="/css/app.css"/>
+</head>
+<body>
+<nav class="nav"><div class="wrap nav-wrap">
+  <a class="logo" href="/"><span class="logo-dot"></span><span class="logo-txt">Encore<b>DLC</b></span></a>
+  <div class="nav-links"><a href="/">Главная</a><a href="/panel">Ключ</a></div>
+</div></nav>
+<div class="panel">
+  <h2>🔑 Активация / статус ключа</h2>
+  <p class="lead">Введи свой ключ вида <span class="mono">ENCR-XXXX-XXXX-XXXX</span>, чтобы проверить статус, или посмотреть информацию о подписке. В чите ключ вводится при первом запуске и привязывается к твоему HWID автоматически.</p>
+  <input id="key" class="input" placeholder="ENCR-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="23"/>
+  <div class="row">
+    <button class="btn btn-primary" id="checkBtn">Проверить ключ</button>
+    <a class="btn btn-ghost" id="botLink" href="#">Купить в Telegram</a>
+  </div>
+  <div id="result"></div>
+
+  <div class="card">
+    <h4>Где взять ключ?</h4>
+    <p style="color:var(--dim);margin:0">Ключи продаёт Telegram-бот автоматически через CryptoBot (оплата TON/USDT). После оплаты бот сразу пришлёт тебе ключ в личные сообщения.</p>
+  </div>
+</div>
+<script>
+  const $ = id => document.getElementById(id);
+  function fmtKey(v){
+    v = v.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if (v.startsWith('ENCR')) v = v.slice(4);
+    return 'ENCR-' + v.match(/.{1,4}/g).slice(0,3).join('-');
+  }
+  const inp = $('key');
+  inp.addEventListener('input', () => { inp.value = fmtKey(inp.value); });
+  $('checkBtn').addEventListener('click', async () => {
+    const key = inp.value.trim();
+    $('result').innerHTML = '<div class="card">Проверяю…</div>';
+    try {
+      const r = await fetch('/api/key/'+encodeURIComponent(key)+'/public');
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        let reason = 'Ключ не найден или истёк.';
+        if (j && j.banned) reason = '🚫 Ключ заблокирован.';
+        $('result').innerHTML = `<div class="card"><h4><span class="tag bad">Невалид</span></h4><p style="color:var(--bad)">${reason}</p></div>`;
+        return;
+      }
+      const planNames = {'7d':'7 дней','30d':'30 дней','life':'Навсегда'};
+      const expText = j.plan==='life'?'Навсегда':(j.expires_at?'до '+new Date(j.expires_at).toLocaleDateString('ru-RU'):'не активирован');
+      $('result').innerHTML = `
+        <div class="card">
+          <h4><span class="tag ok">Активен</span></h4>
+          <div class="bigkey">${key}</div>
+          <div class="kv"><span>Тариф</span><span>${planNames[j.plan]||j.plan}</span></div>
+          <div class="kv"><span>Привязан к HWID</span><span>${j.bound?'✅ да':'⏳ нет — введите в чите'}</span></div>
+          <div class="kv"><span>Действует</span><span>${expText}</span></div>
+        </div>`;
+    } catch(e){ $('result').innerHTML = '<div class="card" style="color:var(--bad)">Ошибка сети</div>'; }
+  });
+  inp.addEventListener('keydown', e => { if(e.key==='Enter') $('checkBtn').click(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "encore-server",
+  "version": "3.0.0",
+  "description": "EncoreDLC auth backend + Telegram sales bot + web panel",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "telegraf": "^4.16.3"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
+  }
+}

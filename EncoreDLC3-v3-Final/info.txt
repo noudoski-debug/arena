@@ -1,0 +1,3 @@
+EncoreDLC — Android native project
+UI refresh: watermark, transitions, graphite/blue theme.
+See README_RU.md for build instructions and validation status.
