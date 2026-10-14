@@ -1,0 +1,61 @@
+name: DearVision internal
+on:
+  workflow_dispatch:
+  push:
+    paths: ['DearVisionRoot/**', 'dump 1.14.11949.zip', '.github/workflows/dearvision.yml']
+  pull_request:
+    paths: ['DearVisionRoot/**', 'dump 1.14.11949.zip', '.github/workflows/dearvision.yml']
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: DearVisionRoot/tools/test.sh
+  android:
+    needs: host-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select installed Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk" && test -d "$sdk/ndk"
+          ndk="$(find "$sdk/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$ndk/ndk-build"
+          echo "NDK_PATH=$ndk" >> "$GITHUB_ENV"
+      - run: DearVisionRoot/build.sh
+      - name: Package and inspect ARM64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=DearVisionRoot/build/libs/arm64-v8a
+          readelf -h "$out/libDear.so" | grep 'Machine:.*AArch64'
+          readelf -h "$out/dear-loader" | grep 'Machine:.*AArch64'
+          package=DearVisionRoot/build/package
+          mkdir -p "$package"
+          cp "$out/libDear.so" "$out/dear-loader" DearVisionRoot/run-root.sh "$package/"
+          cp DearVisionRoot/README_RU.md DearVisionRoot/MODULES_RU.md DearVisionRoot/THIRD_PARTY.md "$package/"
+          cp -r DearVisionRoot/licenses "$package/"
+          printf 'Commit: %s\nNDK: %s\nDevice tested: NO\n' "$GITHUB_SHA" "$NDK_PATH" > "$package/BUILD.txt"
+          (cd "$package" && sha256sum libDear.so dear-loader > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DearVisionRoot-arm64-untested-on-device
+          if-no-files-found: error
+          path: DearVisionRoot/build/package/
+
+      - name: Export buildable sources with dump
+        shell: bash
+        run: |
+          mkdir -p DearVisionRoot/build/sources
+          git archive --format=zip --output=DearVisionRoot/build/sources/DearVisionRoot-source.zip HEAD \
+            DearVisionRoot 'dump 1.14.11949.zip' .github/workflows/dearvision.yml .gitignore README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DearVisionRoot-source-with-dump
+          if-no-files-found: error
+          path: DearVisionRoot/build/sources/DearVisionRoot-source.zip
