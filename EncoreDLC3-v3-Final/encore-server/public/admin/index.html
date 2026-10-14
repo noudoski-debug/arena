@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EncoreDLC — Admin Panel</title>
+<link rel="stylesheet" href="/css/app.css"/>
+</head>
+<body>
+<nav class="nav"><div class="wrap nav-wrap">
+  <a class="logo" href="/"><span class="logo-dot"></span><span class="logo-txt">Encore<b>DLC</b></span></a>
+  <div class="nav-links"><a href="/">Сайт</a><a href="/panel">Панель</a><a href="/admin">Админ</a></div>
+</div></nav>
+
+<div class="admin">
+  <div class="admin-head">
+    <h2 style="margin:0">⚙️ Панель администратора</h2>
+    <div>
+      <button class="btn btn-ghost" id="logout">Выйти</button>
+    </div>
+  </div>
+
+  <div class="stats-grid" id="stats"></div>
+
+  <div class="form-row">
+    <div class="tabs">
+      <div class="tab active" data-f="all">Все</div>
+      <div class="tab" data-f="active">Активные</div>
+      <div class="tab" data-f="unused">Неиспольз.</div>
+      <div class="tab" data-f="expired">Истёкшие</div>
+      <div class="tab" data-f="banned">Забанен.</div>
+    </div>
+    <div style="flex:1"></div>
+    <select id="issuePlan"><option value="7d">7 дней</option><option value="30d">30 дней</option><option value="life">Навсегда</option></select>
+    <input id="issueCount" type="number" value="1" min="1" max="100" style="width:80px"/>
+    <button class="btn btn-primary" id="issueBtn">Выдать ключ(и)</button>
+  </div>
+
+  <table id="keysTable"><thead><tr>
+    <th>Ключ</th><th>Тариф</th><th>HWID</th><th>Создан</th><th>Истекает</th><th>Статус</th><th></th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+let auth = localStorage.getItem('enc_admin') || '';
+
+function b64enc(u,p){return btoa(u+':'+p)}
+async function api(path, opt={}){
+  const headers = {...(opt.headers||{}),'Authorization':'Basic '+auth};
+  if (opt.body && typeof opt.body === 'object'){
+    headers['Content-Type']='application/json';
+    opt.body = JSON.stringify(opt.body);
+  }
+  const r = await fetch('/api'+path,{...opt,headers});
+  if (r.status === 401){
+    const u = prompt('Admin login:', localStorage.getItem('enc_user')||'admin');
+    if (!u) throw new Error('cancelled');
+    const p = prompt('Admin password:');
+    if (!p) throw new Error('cancelled');
+    localStorage.setItem('enc_user',u);
+    auth = b64enc(u,p);
+    localStorage.setItem('enc_admin',auth);
+    return api(path,opt);
+  }
+  return r.json();
+}
+
+let curFilter = 'all';
+async function loadStats(){
+  const s = await api('/admin/stats');
+  $('#stats').innerHTML = `
+    <div class="stat-card"><b>${s.total}</b><span>Всего ключей</span></div>
+    <div class="stat-card"><b style="color:var(--ok)">${s.active}</b><span>Активных</span></div>
+    <div class="stat-card"><b style="color:var(--warn)">${s.unused}</b><span>Неиспольз.</span></div>
+    <div class="stat-card"><b style="color:var(--bad)">${s.banned}</b><span>Забанено</span></div>`;
+}
+function planLabel(p){return {'7d':'7 дней','30d':'30 дней','life':'Навсегда'}[p]||p}
+function statusTag(k){
+  if (k.banned) return '<span class="tag bad">ban</span>';
+  if (!k.hwid) return '<span class="tag warn">не актив.</span>';
+  if (k.plan!=='life' && k.expires_at && Date.now()>k.expires_at) return '<span class="tag bad">истёк</span>';
+  return '<span class="tag ok">активен</span>';
+}
+function fmtDate(x){return x?new Date(x).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}):'—'}
+async function loadKeys(){
+  const rows = await api('/admin/keys?filter='+curFilter);
+  const tb = $('#keysTable tbody');
+  tb.innerHTML = rows.map(k=>`
+    <tr data-key="${k.key}">
+      <td class="mono">${k.key}</td>
+      <td>${planLabel(k.plan)}</td>
+      <td class="mono" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${k.hwid||'—'}</td>
+      <td>${fmtDate(k.created_at)}</td>
+      <td>${k.plan==='life'?'навсегда':fmtDate(k.expires_at)}</td>
+      <td>${statusTag(k)}</td>
+      <td class="actions">
+        <button data-a="copy">copy</button>
+        ${k.banned?'<button data-a="unban">unban</button>':'<button class="danger" data-a="ban">ban</button>'}
+        <button data-a="reset">reset HWID</button>
+        <button class="danger" data-a="delete">del</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:20px">Нет ключей</td></tr>';
+}
+$$('.tab').forEach(t=>t.addEventListener('click',()=>{
+  $$('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active'); curFilter = t.dataset.f; loadKeys();
+}));
+$('#issueBtn').addEventListener('click', async ()=>{
+  const plan = $('#issuePlan').value;
+  const n = parseInt($('#issueCount').value)||1;
+  const r = await api('/admin/issue',{method:'POST',body:{plan,count:n}});
+  if (r.ok){
+    alert('Выдано '+r.keys.length+':\n\n'+r.keys.join('\n'));
+    loadKeys(); loadStats();
+  } else alert('Ошибка');
+});
+$('#keysTable').addEventListener('click', async e=>{
+  const btn = e.target.closest('button'); if (!btn) return;
+  const tr = e.target.closest('tr'); const key = tr.dataset.key;
+  const act = btn.dataset.a;
+  if (act==='copy'){ navigator.clipboard.writeText(key); btn.textContent='copied'; setTimeout(()=>btn.textContent='copy',1000); return; }
+  if (!confirm('Действие: '+act+' на '+key+'?')) return;
+  let body = {key};
+  if (act==='ban') body.reason = prompt('Причина бана:')||'';
+  await api('/admin/'+act, {method:'POST',body});
+  loadKeys(); loadStats();
+});
+$('#logout').addEventListener('click',()=>{localStorage.removeItem('enc_admin');location.reload()});
+loadStats(); loadKeys();
+setInterval(()=>{loadStats()},15000);
+</script>
+</body>
+</html>

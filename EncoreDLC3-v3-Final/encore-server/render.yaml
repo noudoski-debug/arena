@@ -1,0 +1,34 @@
+# render.com blueprint — создаст web service с нужными переменными при нажатии "Deploy to Render"
+services:
+  - type: web
+    name: encore-dlc
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: "18"
+      - key: PORT
+        value: "10000"
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: CRYPTOBOT_TOKEN
+        sync: false
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASS
+        sync: false
+      - key: PUBLIC_BASE_URL
+        fromService:
+          name: encore-dlc
+          type: web
+          property: host
+      - key: PRICE_7D
+        value: "3"
+      - key: PRICE_30D
+        value: "9"
+      - key: PRICE_LIFETIME
+        value: "29"
