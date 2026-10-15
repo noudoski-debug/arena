@@ -1,6 +1,6 @@
 #include "Input.h"
 #include "imgui.h"
-#include "dobby.h"
+#include "Hooks.h"
 #include <android/input.h>
 #include <android/log.h>
 #include <dlfcn.h>
@@ -75,18 +75,20 @@ int32_t consume(void* consumer, void* factory, bool batches, int64_t time, uint3
     return result;
 }
 void* symbol(const char* name) {
+    diagnostics::log("INPUT resolve begin: %s",name);
     void* result = dlsym(RTLD_DEFAULT, name);
     if (!result) result = DobbySymbolResolver("/system/lib64/libinput.so", name);
+    diagnostics::log("INPUT resolve end address=%p",result);
     return result;
 }
 }
 bool install() {
     // Prefer consume: it receives keyboard AND motion events. Fallback supports touch only.
     void* read = symbol("_ZN7android13InputConsumer7consumeEPNS_26InputEventFactoryInterfaceEblPjPPNS_10InputEventE");
-    if (read && DobbyHook(read, reinterpret_cast<void*>(consume), reinterpret_cast<void**>(&originalConsume)) == 0) return true;
+    if (read && hooks::install(read, reinterpret_cast<void*>(consume), reinterpret_cast<void**>(&originalConsume),"InputConsumer.consume") == 0) return true;
     void* init = symbol("_ZN7android13InputConsumer21initializeMotionEventEPNS_11MotionEventEPKNS_12InputMessageE");
-    if (init && DobbyHook(init, reinterpret_cast<void*>(initialize), reinterpret_cast<void**>(&originalInit)) == 0) return true;
-    __android_log_print(ANDROID_LOG_ERROR, "EncoreDLC", "Input hook unavailable on this Android build");
+    if (init && hooks::install(init, reinterpret_cast<void*>(initialize), reinterpret_cast<void**>(&originalInit),"InputConsumer.initializeMotionEvent") == 0) return true;
+    diagnostics::log("INPUT hook unavailable on this Android build");
     return false;
 }
 std::vector<Touch> touches() { auto& q=queue();std::lock_guard<std::mutex> lock(q.mutex);return q.touches; }

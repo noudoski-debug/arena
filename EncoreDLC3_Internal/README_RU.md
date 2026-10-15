@@ -89,6 +89,12 @@ adb logcat -s EncoreDLC
 F10/Insert переключают меню при доступном keyboard input hook. FreeCam: два
 multitouch-стика, UP/DN. Касания продолжают приходить и в игру.
 
+## Если библиотека загружена, но меню отсутствует
+
+См. **[STARTUP_RU.md](STARTUP_RU.md)**: diagnostic-bootstrap-v1 пишет этапы запуска
+в logcat и private `files/encoredlc/startup.log`. Для замены обязательно остановить
+старый процесс игры; новый dlopen не означает, что отработали игровые/renderer hooks.
+
 ## Существенные ограничения
 
 - Root не гарантирует ptrace, доступ игрового процесса к `.so` или разрешение

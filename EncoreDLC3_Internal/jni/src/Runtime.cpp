@@ -1,6 +1,6 @@
 #include "Runtime.h"
 #include "GameOffsets.h"
-#include "dobby.h"
+#include "Hooks.h"
 #include <android/log.h>
 #include <link.h>
 #include <dlfcn.h>
@@ -551,12 +551,14 @@ void setEnabled(bool enabled) {
 const char* status() { return state().message.load(); }
 void installGameHooks() {
     auto& s = state();
+    diagnostics::log("GAME resolving IL2CPP RVAs; waiting up to 120s");
     s.api.health=readHealth;
     uintptr_t update = 0;
     for (int i = 0; i < 120 && !update; ++i) {
         update = resolve(offsets::PlayerUpdate);
         if (!update) sleep(1);
     }
+    diagnostics::log("GAME PlayerUpdate address=%p",reinterpret_cast<void*>(update));
     const uintptr_t disable = resolve(offsets::PlayerOnDisable);
     const uintptr_t late = resolve(offsets::PlayerLateUpdate);
     s.api.raycast=reinterpret_cast<decltype(s.api.raycast)>(resolve(offsets::PhysicsRaycast));
@@ -581,14 +583,14 @@ void installGameHooks() {
     if (!update || !disable || !late || !s.api.project || !s.api.position || !s.api.transform ||
         !s.api.camera || !s.api.local || !s.api.width || !s.api.height) {
         s.message.store("ERROR: IL2CPP RVAs unavailable; check exact game build");
-    } else if (DobbyHook(reinterpret_cast<void*>(disable), reinterpret_cast<void*>(onDisable),
-                         reinterpret_cast<void**>(&s.api.disable)) != 0) {
+    } else if (hooks::install(reinterpret_cast<void*>(disable), reinterpret_cast<void*>(onDisable),
+                         reinterpret_cast<void**>(&s.api.disable),"Player.OnDisable") != 0) {
         s.message.store("ERROR: OnDisable hook failed");
-    } else if (DobbyHook(reinterpret_cast<void*>(update), reinterpret_cast<void*>(onUpdate),
-                         reinterpret_cast<void**>(&s.api.update)) != 0) {
+    } else if (hooks::install(reinterpret_cast<void*>(update), reinterpret_cast<void*>(onUpdate),
+                         reinterpret_cast<void**>(&s.api.update),"Player.Update") != 0) {
         s.message.store("ERROR: Update hook failed");
-    } else if (DobbyHook(reinterpret_cast<void*>(late),reinterpret_cast<void*>(onLate),
-                         reinterpret_cast<void**>(&s.api.late))!=0) {
+    } else if (hooks::install(reinterpret_cast<void*>(late),reinterpret_cast<void*>(onLate),
+                         reinterpret_cast<void**>(&s.api.late),"Player.LateUpdate")!=0) {
         s.message.store("ERROR: LateUpdate projection hook failed");
     } else {
         s.ready.store(true, std::memory_order_release);
@@ -597,21 +599,21 @@ void installGameHooks() {
     if (s.ready.load() && s.api.setPosition && s.api.rotation && s.api.setRotation &&
         s.api.forward && s.api.right && s.api.fov && s.api.setFov && s.api.aspect && s.api.setAspect) {
         bool ok=true;
-        auto hook=[&](uintptr_t rva, Lifecycle callback, Lifecycle& original) {
+        auto hook=[&](uintptr_t rva, Lifecycle callback, Lifecycle& original,const char* name) {
             const uintptr_t target=resolve(rva);
-            if (!target || DobbyHook(reinterpret_cast<void*>(target),reinterpret_cast<void*>(callback),
-                                     reinterpret_cast<void**>(&original))!=0) ok=false;
+            if (!target || hooks::install(reinterpret_cast<void*>(target),reinterpret_cast<void*>(callback),
+                                     reinterpret_cast<void**>(&original),name)!=0) ok=false;
         };
-        hook(offsets::WeaponUpdate,onWeaponUpdate,s.api.weaponUpdate);
-        hook(offsets::FpLateUpdate,onFpLate,s.api.fpLate);
+        hook(offsets::WeaponUpdate,onWeaponUpdate,s.api.weaponUpdate,"FPHitscan.Update");
+        hook(offsets::FpLateUpdate,onFpLate,s.api.fpLate,"FPManager.LateUpdate");
         const uintptr_t raycast=resolve(offsets::RaycastInjected);
-        s.silentReady.store(raycast && DobbyHook(reinterpret_cast<void*>(raycast),
-            reinterpret_cast<void*>(onRaycast),reinterpret_cast<void**>(&s.api.raycastOriginal))==0);
+        s.silentReady.store(raycast && hooks::install(reinterpret_cast<void*>(raycast),
+            reinterpret_cast<void*>(onRaycast),reinterpret_cast<void**>(&s.api.raycastOriginal),"PhysicsScene.Raycast")==0);
         s.moduleReady.store(ok);
         s.message.store(!ok?"ESP ready / ERROR: gameplay module hooks failed":
             !s.silentReady.load()?"ESP + Aim ready / ERROR: silent ray hook failed":
             "Internal hooks ready / Silent Ray EXPERIMENT (device validation required)");
     } else if (s.ready.load()) s.message.store("ESP ready / ERROR: module API unavailable");
-    __android_log_print(ANDROID_LOG_INFO, "EncoreDLC", "%s", status());
+    diagnostics::log("GAME %s",status());
 }
 }

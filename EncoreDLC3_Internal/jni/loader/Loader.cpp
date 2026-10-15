@@ -198,6 +198,6 @@ int main(int argc,char** argv) {
     const bool released=session.call(munmapFn,{buffer,size},ignored) && ignored==0;
     const bool restored=session.close();
     if (!released || !restored) return 8;
-    std::printf("libEncore.so loaded. Verify asynchronous hooks with: logcat -s EncoreDLC\n");
+    std::printf("libEncore.so mapped (dlopen only; hooks/render not confirmed).\nRead logcat -s EncoreDLC, or files/encoredlc/startup.log in the game private data.\n");
     return 0;
 }

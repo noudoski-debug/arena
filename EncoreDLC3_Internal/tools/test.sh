@@ -14,6 +14,8 @@ INC=(-I"$ROOT/jni/include" -I"$ROOT/jni/include/ImGui" -I"$ROOT/jni/include/Hook
 "$CXX" -std=c++17 -DENCORE_HOST_TEST "${INC[@]}" "$ROOT/tests/test_modules.cpp" "$ROOT/jni/src/Config.cpp" "$ROOT/jni/src/Effects.cpp" -o "$OUT/modules"
 "$OUT/modules"
 "$OUT/maps"
+"$CXX" -std=c++17 -pthread "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_bootstrap.cpp" -o "$OUT/bootstrap"
+"$OUT/bootstrap"
 "$CXX" -std=c++17 -pthread "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_runtime.cpp" -ldl -o "$OUT/runtime"
 "$OUT/runtime"
 "$CXX" -std=c++17 -pthread -rdynamic "${INC[@]}" -I"$ROOT/tests/stubs" "$ROOT/tests/test_health.cpp" -ldl -o "$OUT/health"
