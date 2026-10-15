@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: EncoreDLC3_Internal/tools/test.sh
   android:
+    permissions:
+      contents: write
     needs: host-tests
     runs-on: ubuntu-latest
     steps:
@@ -59,3 +61,58 @@ jobs:
           name: EncoreDLC3_Internal-source-with-dump
           if-no-files-found: error
           path: EncoreDLC3_Internal/build/sources/EncoreDLC3_Internal-source.zip
+
+      # Publish on the session branch only; never upload binaries from PRs/forks.
+      - name: Publish downloadable internal preview
+        if: github.event_name == 'push' && github.ref == 'refs/heads/arena/16ea671a-arena'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=EncoreDLC3_Internal/build/release
+          mkdir -p "$release"
+          cp EncoreDLC3_Internal/build/sources/EncoreDLC3_Internal-source.zip "$release/EncoreDLC3_ESP_10FPS_INTERNAL_source.zip"
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          package=Path('EncoreDLC3_Internal/build/package')
+          output=Path('EncoreDLC3_Internal/build/release/EncoreDLC3_ESP_10FPS_INTERNAL_arm64.zip')
+          with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(package.rglob('*')):
+                  if path.is_file():
+                      archive.write(path,path.relative_to(package))
+          PY
+          (cd "$release" && sha256sum *.zip > DOWNLOAD_SHA256SUMS)
+          tag="encore-internal-${GITHUB_SHA:0:12}"
+          cat > "$release/RELEASE_NOTES.md" <<EOF
+          ## EncoreDLC3 ESP 10FPS → Internal ARM64 (preview, incomplete)
+
+          Исходник: EncoreDLC3_ESP_10FPS_source_fix.zip, SHA-256 записан в SOURCE_MAP.json.
+          Commit: $GITHUB_SHA
+          Build and host tests: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          **Сборка NDK прошла. Проверки на телефоне не было. Не все функции реализованы.**
+          Это не релиз «всё работает» и не подтверждённый рабочий Silent Aim.
+
+          - arm64.zip: libEncore.so, encore-loader, run-root.sh, инструкции, лицензии и SHA256SUMS.
+          - source.zip: internal-исходники, исходный external ZIP для сверки, dump.cs в исходном архиве дампа, тесты и CI.
+          - Цель: com.catsbit.oxidesurvivalisland / 1.14.11949 / arm64-v8a / GLES3.
+          - ESP snapshots, обычный Aim со сглаживанием, физический Visible Check, раздельные Death Check.
+          - Silent Ray — эксперимент: настоящий shot callsite и серверные попадания не подтверждены.
+          - Death Check использует runtime Health; семантика обфусцированного поля требует device-проверки.
+          - Armor/Ammo bars, Wallshot/Infinity Ammo, Bunny Hop/Strafer/Fast Knife/Air Jump/Invisible,
+            Buy Anywhere/Infinity Buy, World/Grenade backend и автоматические hit/kill hooks не реализованы.
+          - Chams — исходный DrawList renderer, не shader chams; FreeCam — визуальная камера.
+          - Root loader экспериментальный. Vulkan, SELinux bypass и hot-unload не поддерживаются.
+
+          Полные ограничения: MODULES_RU.md и ENCORE_ESP_FIX_RU.md внутри архивов.
+          EOF
+          gh release create "$tag" \
+            "$release/EncoreDLC3_ESP_10FPS_INTERNAL_arm64.zip" \
+            "$release/EncoreDLC3_ESP_10FPS_INTERNAL_source.zip" \
+            "$release/DOWNLOAD_SHA256SUMS" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title 'EncoreDLC3 Internal ARM64 — preview (не все функции)' \
+            --notes-file "$release/RELEASE_NOTES.md"
