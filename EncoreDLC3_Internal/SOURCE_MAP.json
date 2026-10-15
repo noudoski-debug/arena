@@ -1,0 +1,143 @@
+{
+  "source_archive": "EncoreDLC3_ESP_10FPS_source_fix.zip",
+  "sha256": "86ab386576bd55d953d3a9ed0a97e337bd15ed7bd1298bf55995f28385d5b3ec",
+  "payload": "libEncore.so",
+  "loader": "encore-loader",
+  "device_tested": false,
+  "all_features_complete": false,
+  "shared_dependencies": "Dobby and newer ImGui from the existing internal scaffold; see THIRD_PARTY.md",
+  "source_units": [
+    {
+      "original": "jni/src/main.cpp",
+      "original_sha256": "5eac751a719053ac8e63b7b0bc072dbc9a9d94cb6a108a5bc567d7d1dd9c1752",
+      "internal": [
+        "jni/src/Main.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/RemotePatch.cpp",
+      "original_sha256": "d382ce017ce75b0490071034a2cfd7c5e97890d8229f1525aa9b448d408ef60e",
+      "internal": [
+        "jni/src/Runtime.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/Esp.cpp",
+      "original_sha256": "4f55273dc071ddccb67df4b29ad81da1403d739fb7b246446f38148cde2a45e2",
+      "internal": [
+        "jni/src/Runtime.cpp",
+        "jni/src/Menu.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/Aim.cpp",
+      "original_sha256": "17ed791ee6532e7f379347a413b0078113706fdacd5446d4ae681ec8ca1669bc",
+      "internal": [
+        "jni/src/Runtime.cpp",
+        "jni/include/ModuleMath.h"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/FreeCam.cpp",
+      "original_sha256": "deac9d1949e6368d524d4b5cfe891fb3bc88dadea95b2b6697fc896110f49941",
+      "internal": [
+        "jni/src/Runtime.cpp",
+        "jni/src/Menu.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/Bind.cpp",
+      "original_sha256": "abafa4e0cbacee88a904a3d353478a4b9a6cc58abded42580d1a97a2c3327c80",
+      "internal": [
+        "jni/src/Input.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/Vars.cpp",
+      "original_sha256": "0d11aad45b21b73b5744c80ff17ff86394c4fde6b5bb2e83ad13cec25b18669e",
+      "internal": [
+        "jni/src/Config.cpp",
+        "jni/src/Menu.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/include/Vars.h",
+      "original_sha256": "0c9a4dbcadc02a66e4d6ea5f0d51536de828a37b6bb143815169a3d4be88dc9f",
+      "internal": [
+        "jni/include/Vars.h"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/src/LitvinMenu.h",
+      "original_sha256": "d3640d147dcaf795e86823d2fbe8a72c5d74b66c5b83885fc7fa93de31ec7fb1",
+      "internal": [
+        "jni/include/encore/LitvinMenu.h"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/include/HitEffect.h",
+      "original_sha256": "eae16e55f0bf861376c7cdf77d5e42866b0c520f0303081e4d4381285ac84148",
+      "internal": [
+        "jni/include/encore/HitEffect.h"
+      ],
+      "change": "retained verbatim"
+    },
+    {
+      "original": "jni/src/Chams.h",
+      "original_sha256": "358ad6da0b0b1011eb9d2a1ee57e1f2ee357c91ed220e10e81d3ef6958524b61",
+      "internal": [
+        "jni/include/Chams.h"
+      ],
+      "change": "retained verbatim"
+    },
+    {
+      "original": "jni/src/Chams.cpp",
+      "original_sha256": "4c572ceae7affb7fb8fdcaaf9c084a76432e408650ff1400882116377824c0a9",
+      "internal": [
+        "jni/src/Chams.cpp"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/Android.mk",
+      "original_sha256": "d39e929ecb023864508acb9f90a63d85c91aac8c548988057e27e8f260270c2f",
+      "internal": [
+        "jni/Android.mk"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "jni/Application.mk",
+      "original_sha256": "aabc16a625eb7c44efcfe78f056f7842b42b39835f11e4cd4155271e517e3e8b",
+      "internal": [
+        "jni/Application.mk"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "run-root.sh",
+      "original_sha256": "abc41a90129d1d42eab80c69ca5360ea749a5d92aca7d4206088ca6757aeab3c",
+      "internal": [
+        "run-root.sh"
+      ],
+      "change": "adapted / replaced"
+    },
+    {
+      "original": "build.sh",
+      "original_sha256": "251056bb8e0a286f55187c5476aabc1c413424baf05a90db8926c02e7cf20444",
+      "internal": [
+        "build.sh"
+      ],
+      "change": "adapted / replaced"
+    }
+  ]
+}

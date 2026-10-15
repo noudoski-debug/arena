@@ -1,10 +1,10 @@
-name: DearVision internal
+name: EncoreDLC3 internal
 on:
   workflow_dispatch:
   push:
-    paths: ['DearVisionRoot/**', 'dump 1.14.11949.zip', '.github/workflows/dearvision.yml']
+    paths: ['EncoreDLC3_Internal/**', 'dump 1.14.11949.zip', 'EncoreDLC3_ESP_10FPS_source_fix.zip', '.github/workflows/dearvision.yml']
   pull_request:
-    paths: ['DearVisionRoot/**', 'dump 1.14.11949.zip', '.github/workflows/dearvision.yml']
+    paths: ['EncoreDLC3_Internal/**', 'dump 1.14.11949.zip', 'EncoreDLC3_ESP_10FPS_source_fix.zip', '.github/workflows/dearvision.yml']
 permissions:
   contents: read
 jobs:
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: DearVisionRoot/tools/test.sh
+      - run: EncoreDLC3_Internal/tools/test.sh
   android:
     needs: host-tests
     runs-on: ubuntu-latest
@@ -27,35 +27,35 @@ jobs:
           ndk="$(find "$sdk/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           test -x "$ndk/ndk-build"
           echo "NDK_PATH=$ndk" >> "$GITHUB_ENV"
-      - run: DearVisionRoot/build.sh
+      - run: EncoreDLC3_Internal/build.sh
       - name: Package and inspect ARM64 binaries
         shell: bash
         run: |
           set -euo pipefail
-          out=DearVisionRoot/build/libs/arm64-v8a
-          readelf -h "$out/libDear.so" | grep 'Machine:.*AArch64'
-          readelf -h "$out/dear-loader" | grep 'Machine:.*AArch64'
-          package=DearVisionRoot/build/package
+          out=EncoreDLC3_Internal/build/libs/arm64-v8a
+          readelf -h "$out/libEncore.so" | grep 'Machine:.*AArch64'
+          readelf -h "$out/encore-loader" | grep 'Machine:.*AArch64'
+          package=EncoreDLC3_Internal/build/package
           mkdir -p "$package"
-          cp "$out/libDear.so" "$out/dear-loader" DearVisionRoot/run-root.sh "$package/"
-          cp DearVisionRoot/README_RU.md DearVisionRoot/MODULES_RU.md DearVisionRoot/THIRD_PARTY.md "$package/"
-          cp -r DearVisionRoot/licenses "$package/"
+          cp "$out/libEncore.so" "$out/encore-loader" EncoreDLC3_Internal/run-root.sh "$package/"
+          cp EncoreDLC3_Internal/README_RU.md EncoreDLC3_Internal/MODULES_RU.md EncoreDLC3_Internal/ENCORE_ESP_FIX_RU.md EncoreDLC3_Internal/THIRD_PARTY.md EncoreDLC3_Internal/SOURCE_MAP.json "$package/"
+          cp -r EncoreDLC3_Internal/licenses "$package/"
           printf 'Commit: %s\nNDK: %s\nDevice tested: NO\n' "$GITHUB_SHA" "$NDK_PATH" > "$package/BUILD.txt"
-          (cd "$package" && sha256sum libDear.so dear-loader > SHA256SUMS)
+          (cd "$package" && sha256sum libEncore.so encore-loader > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
-          name: DearVisionRoot-arm64-untested-on-device
+          name: EncoreDLC3_Internal-arm64-untested-on-device
           if-no-files-found: error
-          path: DearVisionRoot/build/package/
+          path: EncoreDLC3_Internal/build/package/
 
       - name: Export buildable sources with dump
         shell: bash
         run: |
-          mkdir -p DearVisionRoot/build/sources
-          git archive --format=zip --output=DearVisionRoot/build/sources/DearVisionRoot-source.zip HEAD \
-            DearVisionRoot 'dump 1.14.11949.zip' .github/workflows/dearvision.yml .gitignore README.md
+          mkdir -p EncoreDLC3_Internal/build/sources
+          git archive --format=zip --output=EncoreDLC3_Internal/build/sources/EncoreDLC3_Internal-source.zip HEAD \
+            EncoreDLC3_Internal 'dump 1.14.11949.zip' 'EncoreDLC3_ESP_10FPS_source_fix.zip' .github/workflows/dearvision.yml .gitignore README.md
       - uses: actions/upload-artifact@v4
         with:
-          name: DearVisionRoot-source-with-dump
+          name: EncoreDLC3_Internal-source-with-dump
           if-no-files-found: error
-          path: DearVisionRoot/build/sources/DearVisionRoot-source.zip
+          path: EncoreDLC3_Internal/build/sources/EncoreDLC3_Internal-source.zip
