@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+.env
+.env.*
+*report.html
+*graph.json
+!data_tools/report.html
